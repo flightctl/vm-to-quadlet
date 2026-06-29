@@ -486,7 +486,7 @@ func TestConvert_EmptyDirVolume(t *testing.T) {
 		// volumes (regardless of medium) so the volume is shared across all
 		// containers in the pod with consistent options.
 		vf := requireFile(t, files, "myvm-private-empty.volume")
-		require.Contains(t, vf.Content, "type=tmpfs")
+		require.Contains(t, vf.Content, "Type=tmpfs")
 	})
 }
 
@@ -515,7 +515,7 @@ func TestConvert_EmptyDirVolume_MemoryMedium(t *testing.T) {
 
 	t.Run("companion .volume file is generated with tmpfs options", func(t *testing.T) {
 		vf := requireFile(t, files, "myvm-private-empty.volume")
-		require.Contains(t, vf.Content, "type=tmpfs")
+		require.Contains(t, vf.Content, "Type=tmpfs")
 	})
 }
 
