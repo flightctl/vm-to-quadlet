@@ -1,0 +1,51 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: fedora-vm
+spec:
+  running: true
+  dataVolumeTemplates:
+  - metadata:
+      name: fedora-os
+    spec:
+      source:
+        registry:
+          url: docker://quay.io/containerdisks/fedora:40
+      storage:
+        resources:
+          requests:
+            storage: 10Gi
+  template:
+    spec:
+      domain:
+        devices:
+          disks:
+          - disk:
+              bus: virtio
+            name: containerdisk
+          - disk:
+              bus: virtio
+            name: cloudinitdisk
+          interfaces:
+          - masquerade: {}
+            name: default
+            ports:
+            - port: 22
+          rng: {}
+        memory:
+          guest: 1024M
+        resources: {}
+      networks:
+      - name: default
+        pod: {}
+      volumes:
+      - dataVolume:
+          name: fedora-os
+        name: containerdisk
+      - cloudInitNoCloud:
+          userData: |-
+            #cloud-config
+            ssh_pwauth: true
+            password: fedora
+            chpasswd: { expire: False }
+        name: cloudinitdisk

@@ -1,0 +1,74 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: windows-vm
+spec:
+  running: true
+  template:
+    spec:
+      domain:
+        firmware:
+          bootloader:
+            efi:
+              secureBoot: false
+        cpu:
+          cores: 2
+          sockets: 1
+          threads: 1
+        features:
+          acpi:
+            enabled: true
+          apic:
+            enabled: true
+          hyperv:
+            relaxed:    { enabled: true }
+            vapic:      { enabled: true }
+            spinlocks:  { enabled: true, spinlocks: 8191 }
+            vpindex:    { enabled: true }
+            runtime:    { enabled: true }
+            synic:      { enabled: true }
+            synictimer: { enabled: true, direct: { enabled: true } }
+            reset:      { enabled: true }
+            frequencies: { enabled: true }
+            tlbflush:   { enabled: true }
+            ipi:        { enabled: true }
+            stimer:     { enabled: true }
+        clock:
+          utc: {}
+          timer:
+            hpet: { present: false }
+            pit: { tickPolicy: delay }
+            rtc: { tickPolicy: catchup }
+            hyperv: { present: true }
+        devices:
+          autoattachMemBalloon: false
+          disks:
+          - disk:
+              bus: virtio
+            cache: writeback
+            dedicatedIOThread: true
+            name: rootdisk
+          interfaces:
+          - masquerade: {}
+            name: default
+            model: virtio
+            ports:
+            - port: 3389
+          inputs:
+          - type: tablet
+            bus: usb
+            name: tablet
+          tpm: {}
+        memory:
+          guest: 4Gi
+        resources: {}
+      networks:
+      - name: default
+        pod: {}
+      volumes:
+      - name: rootdisk
+        hostDisk:
+          # Path to the installed Windows disk image on the host.
+          # Use windows-install.yaml first to produce this image.
+          path: /path/to/windows-vm.img
+          type: DiskOrFail
