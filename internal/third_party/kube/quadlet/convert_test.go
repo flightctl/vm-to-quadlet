@@ -689,7 +689,7 @@ func TestConvert_VolumeMount_EmptyDir_Memory(t *testing.T) {
 	require.NotNil(t, volFile, "expected p-mem-empty.volume for Memory-medium emptyDir")
 	volContent, err := volFile.Unit.ToString()
 	require.NoError(t, err)
-	assert.Contains(t, volContent, "Type=tmpfs", "volume unit must declare tmpfs type")
+	assert.Contains(t, volContent, "type=tmpfs", "volume unit Options must include type=tmpfs driver option")
 
 	// The container must use Volume= referencing the named .volume unit, not Mount=type=tmpfs.
 	cu := containerUnit(files, "p", "app")

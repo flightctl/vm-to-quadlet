@@ -66,10 +66,12 @@ func Convert(pod *v1.Pod, opts Options) ([]*GeneratedFile, error) {
 			volUnit.Filename = volName + ".volume"
 			volUnit.Set(quadlet.UnitGroup, "Description",
 				fmt.Sprintf("Shared tmpfs volume %s for pod %s", v.Name, pod.Name))
-		volUnit.Set(quadlet.VolumeGroup, "Driver", "local")
-		volUnit.Set(quadlet.VolumeGroup, "Device", "tmpfs")
-		volUnit.Set(quadlet.VolumeGroup, "Type", "tmpfs")
-		volUnit.Set(quadlet.VolumeGroup, "Options", "nodev,mode=0777")
+			volUnit.Set(quadlet.VolumeGroup, "Driver", "local")
+			// For Driver=local, tmpfs options must be expressed as Docker-style
+			// key=value pairs in Options= so Podman passes them via --opt flags.
+			// Type=/Device= are systemd mount-unit keys and are silently ignored
+			// in Quadlet [Volume] sections.
+			volUnit.Set(quadlet.VolumeGroup, "Options", "type=tmpfs,device=tmpfs,o=nodev,mode=0777")
 			output = append(output, &GeneratedFile{Name: volUnit.Filename, Unit: volUnit})
 			emptyDirVolNames = append(emptyDirVolNames, volName)
 		}
