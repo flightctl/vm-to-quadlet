@@ -64,10 +64,6 @@ func AdaptForStandalone(pod *k8sv1.Pod, prepared *PreparedVM, opts Options) (*k8
 	// Add persistence warning annotations for volumes that require special setup.
 	addPersistenceWarnings(pod, vm)
 
-	// Populate VMI interface status with PodInterfaceName.
-	// In Kubernetes, virt-handler sets this; for standalone mode we must do it ourselves.
-	populateInterfaceStatus(vmi)
-
 	injectComputeReadinessProbe(pod, vmi)
 
 	vmiJSON, err := json.Marshal(vmi)
@@ -710,12 +706,3 @@ func addPersistenceWarnings(pod *k8sv1.Pod, vm *virtv1.VirtualMachine) {
 	}
 }
 
-func populateInterfaceStatus(vmi *virtv1.VirtualMachineInstance) {
-	for i, iface := range vmi.Spec.Domain.Devices.Interfaces {
-		podIfaceName := fmt.Sprintf("eth%d", i)
-		vmi.Status.Interfaces = append(vmi.Status.Interfaces, virtv1.VirtualMachineInstanceNetworkInterface{
-			Name:             iface.Name,
-			PodInterfaceName: podIfaceName,
-		})
-	}
-}

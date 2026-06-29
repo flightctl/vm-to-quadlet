@@ -65,6 +65,12 @@ func PrepareForRendering(vm *virtv1.VirtualMachine, opts Options) (*PreparedVM, 
 		vmi.UID = types.UID(vmi.Namespace)
 	}
 
+	// Populate VMI interface status with PodInterfaceName now that interfaces
+	// are finalised (forcePasstBinding has already run). In Kubernetes this is
+	// done by virt-handler at runtime; here we do it offline so the marshaled
+	// VMI in STANDALONE_VMI carries the correct status from the start.
+	populateInterfaceStatus(vmi)
+
 	return &PreparedVM{
 		VM:       vm,
 		VMI:      vmi,
@@ -133,6 +139,20 @@ func addPVCStub(pvcCache cache.Indexer, ns, claimName string, volumeMode k8sv1.P
 		},
 	}
 	_ = pvcCache.Add(pvc)
+}
+
+// populateInterfaceStatus fills vmi.Status.Interfaces with PodInterfaceName
+// for each interface in the spec. In Kubernetes this is done at runtime by
+// virt-handler; for offline conversion we do it here, once interfaces are
+// finalised, so that the STANDALONE_VMI env var carries the correct status.
+func populateInterfaceStatus(vmi *virtv1.VirtualMachineInstance) {
+	for i, iface := range vmi.Spec.Domain.Devices.Interfaces {
+		podIfaceName := fmt.Sprintf("eth%d", i)
+		vmi.Status.Interfaces = append(vmi.Status.Interfaces, virtv1.VirtualMachineInstanceNetworkInterface{
+			Name:             iface.Name,
+			PodInterfaceName: podIfaceName,
+		})
+	}
 }
 
 // forcePasstBinding ensures all VMI interfaces use PasstBinding and are
