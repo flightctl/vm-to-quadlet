@@ -17,9 +17,9 @@ func applyMount(unit *parser.UnitFile, m v1.VolumeMount, src v1.VolumeSource, pr
 	case src.HostPath != nil:
 		return applyHostPathMount(unit, m, src.HostPath)
 	case src.PersistentVolumeClaim != nil:
-		return applyPVCMount(unit, m, src.PersistentVolumeClaim, prefix)
+		return applyPVCMount(unit, m, prefix)
 	case src.EmptyDir != nil:
-		return applyEmptyDirMount(unit, m, src.EmptyDir, m.Name, prefix)
+		return applyEmptyDirMount(unit, m, m.Name, prefix)
 	case src.Image != nil:
 		return applyImageMount(unit, m, src.Image)
 	case src.ConfigMap != nil, src.Secret != nil:
@@ -94,7 +94,7 @@ func applyHostPathMount(unit *parser.UnitFile, m v1.VolumeMount, hp *v1.HostPath
 	return nil
 }
 
-func applyPVCMount(unit *parser.UnitFile, m v1.VolumeMount, pvc *v1.PersistentVolumeClaimVolumeSource, prefix string) error {
+func applyPVCMount(unit *parser.UnitFile, m v1.VolumeMount, prefix string) error {
 	volName := fmt.Sprintf("%s-%s.volume", prefix, m.Name)
 
 	if m.SubPath != "" {
@@ -119,7 +119,7 @@ func applyPVCMount(unit *parser.UnitFile, m v1.VolumeMount, pvc *v1.PersistentVo
 	return nil
 }
 
-func applyEmptyDirMount(unit *parser.UnitFile, m v1.VolumeMount, ed *v1.EmptyDirVolumeSource, volName, prefix string) error {
+func applyEmptyDirMount(unit *parser.UnitFile, m v1.VolumeMount, volName, prefix string) error {
 	// Always use a named volume so all containers in the pod share the same
 	// underlying storage — matching Kubernetes emptyDir semantics where every
 	// container that mounts the volume sees the same data.

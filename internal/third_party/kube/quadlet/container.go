@@ -36,8 +36,7 @@ func buildContainerUnit(c v1.Container, pod *v1.Pod, opts Options) ([]*Generated
 	}
 
 	// §6.2 Command & args
-	var scriptFile *GeneratedFile
-	scriptFile = applyExec(unit, c.Command, c.Args, opts.NamePrefix, c.Name, opts.ScriptDir)
+	scriptFile := applyExec(unit, c.Command, c.Args, opts.NamePrefix, c.Name, opts.ScriptDir)
 
 	// §6.3 Environment (large values collected for env file)
 	envLines, err := applyEnv(unit, c.Env, c.EnvFrom, pod, &c, opts)

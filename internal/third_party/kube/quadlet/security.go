@@ -167,13 +167,3 @@ func applySupplementalGroups(unit *parser.UnitFile, psc *v1.PodSecurityContext) 
 		unit.Add(quadlet.ContainerGroup, quadlet.KeyGroupAdd, fmt.Sprintf("%d", gid))
 	}
 }
-
-// applySysctls emits Sysctl= entries on the anchor unit only.
-func applySysctls(unit *parser.UnitFile, psc *v1.PodSecurityContext) {
-	if psc == nil {
-		return
-	}
-	for _, s := range psc.Sysctls {
-		unit.Add(quadlet.ContainerGroup, quadlet.KeySysctl, fmt.Sprintf("%s=%s", s.Name, s.Value))
-	}
-}

@@ -37,7 +37,7 @@ func applyExec(unit *parser.UnitFile, command, args []string, prefix, name, scri
 
 	if len(command) > 0 {
 		unit.Set(quadlet.ContainerGroup, quadlet.KeyEntrypoint, command[0])
-		execArgs := append(command[1:], args...)
+		execArgs := append(append([]string(nil), command[1:]...), args...)
 		if len(execArgs) > 0 {
 			unit.AddCmdline(quadlet.ContainerGroup, quadlet.KeyExec, execArgs)
 		}
