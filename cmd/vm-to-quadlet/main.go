@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/tar"
 	"fmt"
 	"io"
 	"os"
@@ -174,8 +175,8 @@ func readVM(vmFile string) (*virtv1.VirtualMachine, error) {
 	return vm, nil
 }
 
-// writeFiles writes each UnitFile to outputDir, or prints them to stdout
-// separated by "### <filename>" markers when outputDir is empty.
+// writeFiles writes each UnitFile to outputDir, or streams them as a TAR
+// archive to stdout when outputDir is empty (for machine consumption).
 func writeFiles(files []quadlet.UnitFile, outputDir string) error {
 	if outputDir != "" {
 		if err := os.MkdirAll(outputDir, 0o755); err != nil {
@@ -195,12 +196,25 @@ func writeFiles(files []quadlet.UnitFile, outputDir string) error {
 		return nil
 	}
 
-	for i, f := range files {
-		if i > 0 {
-			fmt.Println()
+	return writeTAR(os.Stdout, files)
+}
+
+// writeTAR encodes the given unit files as a TAR archive written to w.
+func writeTAR(w io.Writer, files []quadlet.UnitFile) error {
+	tw := tar.NewWriter(w)
+	for _, f := range files {
+		data := []byte(f.Content)
+		hdr := &tar.Header{
+			Name: f.Name,
+			Mode: 0o644,
+			Size: int64(len(data)),
 		}
-		fmt.Printf("### %s\n", f.Name)
-		fmt.Print(f.Content)
+		if err := tw.WriteHeader(hdr); err != nil {
+			return fmt.Errorf("writing TAR header for %q: %w", f.Name, err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			return fmt.Errorf("writing TAR content for %q: %w", f.Name, err)
+		}
 	}
-	return nil
+	return tw.Close()
 }
