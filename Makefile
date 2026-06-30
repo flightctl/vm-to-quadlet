@@ -1,4 +1,4 @@
-BIN   := vm-to-quadlet
+BIN   := bin/vm-to-quadlet
 CMD   := ./cmd/vm-to-quadlet
 IMAGE ?= quay.io/kubevirt/kubevirt-vm-to-quadlet
 TAG   ?= latest
@@ -6,6 +6,7 @@ TAG   ?= latest
 .PHONY: build test lint image push clean
 
 build:
+	mkdir -p bin
 	CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags="-s -w" -o $(BIN) $(CMD)
 
 test:
@@ -21,4 +22,4 @@ push:
 	podman push $(IMAGE):$(TAG)
 
 clean:
-	rm -f $(BIN)
+	rm -rf bin/
