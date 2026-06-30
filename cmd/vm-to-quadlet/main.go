@@ -29,6 +29,7 @@ func main() {
 		serialImage      string
 		outputDir        string
 		passtWorkarounds bool
+		network          string
 	)
 
 	rootCmd := &cobra.Command{
@@ -55,6 +56,7 @@ or /etc/containers/systemd/ (system units) alongside the generated <vmname>-comp
 
 			convOpts := quadlet.DefaultOptions()
 			convOpts.PasstWorkarounds = passtWorkarounds
+			convOpts.Network = network
 
 			opts := standalone.Options{
 				LauncherImage:    launcherImage,
@@ -91,6 +93,8 @@ or /etc/containers/systemd/ (system units) alongside the generated <vmname>-comp
 		"Container image for the serial console socat proxy sidecar")
 	rootCmd.Flags().BoolVar(&passtWorkarounds, "passt-workarounds", false,
 		"Patch the passt.avx2 binary at pod startup to fix the mrg_rxbuf crash with 2+ vCPU guests (needed for virt-launcher images predating passt 0^20260611.ga9c61ff)")
+	rootCmd.Flags().StringVar(&network, "network", "",
+		"Quadlet Network= value for the VM pod (e.g. \"shared.network\" or \"host\"); omit to generate a dedicated per-VM .network unit for full isolation")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

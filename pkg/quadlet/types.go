@@ -94,12 +94,9 @@ type Options struct {
 
 // DefaultOptions returns Options with sensible defaults for standalone VM execution.
 //
-// Network is set to "podman" (the default rootless bridge network) so the compute
-// container gets an `eth0` interface inside its network namespace. KubeVirt's passt
-// integration hardcodes `eth0` as the interface name; the pasta network mode (Podman's
-// default for rootless) exposes the host's physical interface instead, which breaks passt.
+// Network is left empty so Convert() generates a per-VM <vmname>.network Quadlet unit,
+// giving each VM its own isolated Podman bridge network. Set Network explicitly to share
+// a network across VMs or to use a pre-existing named network.
 func DefaultOptions() Options {
-	return Options{
-		Network: "podman",
-	}
+	return Options{}
 }

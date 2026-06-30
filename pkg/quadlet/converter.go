@@ -15,6 +15,11 @@ import (
 // the vendored in-process kube quadlet converter. The pod name is used as the
 // name prefix for all generated filenames.
 //
+// When opts.Network is empty a dedicated <vmname>.network Quadlet unit is generated
+// and Network= is set to "<vmname>.network", giving each VM an isolated bridge network.
+// When opts.Network is set explicitly no .network unit is generated and the value is
+// used as-is, allowing the caller to reference a shared or pre-existing network.
+//
 // Step 6a (preConvertFixups) runs internally before the conversion to apply
 // KubeVirt-specific overrides (TypeMeta, TerminationGracePeriodSeconds).
 //
@@ -22,7 +27,26 @@ import (
 // standalone.ApplyPostConvertFixups.
 func Convert(pod *k8sv1.Pod, opts Options) ([]UnitFile, error) {
 	pod = preConvertFixups(pod)
-	return runInProcess(pod.Name, pod, opts)
+
+	var networkUnit *UnitFile
+	if opts.Network == "" {
+		name := pod.Name + ".network"
+		networkUnit = &UnitFile{
+			Name:    name,
+			Content: "[Network]\n",
+		}
+		opts.Network = name
+	}
+
+	files, err := runInProcess(pod.Name, pod, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	if networkUnit != nil {
+		files = append(files, *networkUnit)
+	}
+	return files, nil
 }
 
 // runInProcess converts a Pod spec to Quadlet unit files using the vendored
