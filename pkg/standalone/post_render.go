@@ -187,6 +187,33 @@ func injectPersistentStateVolumes(pod *k8sv1.Pod, vmi *virtv1.VirtualMachineInst
 			break
 		}
 	}
+
+	// Ensure the subpath directories inside vm-state are owned by qemu (uid 107)
+	// before the compute container starts. Podman creates missing subpath
+	// directories at container startup with root:root ownership; if the
+	// directory already exists with the correct ownership this is a no-op.
+	//
+	// We do this by extending the existing virt-handler-dir-init init container:
+	// mount vm-state at /vm-state-init and mkdir the three subpath directories
+	// there. Running as uid 107 guarantees correct ownership.
+	const initMountPath = "/vm-state-init"
+	extraMount := k8sv1.VolumeMount{Name: vmStateVol, MountPath: initMountPath}
+	extraCmds := []string{
+		"mkdir -p " + initMountPath + "/nvram",
+		"mkdir -p " + initMountPath + "/swtpm",
+		"mkdir -p " + initMountPath + "/swtpm-localca",
+	}
+	for i, c := range pod.Spec.InitContainers {
+		if c.Name != "virt-handler-dir-init" {
+			continue
+		}
+		pod.Spec.InitContainers[i].VolumeMounts = append(c.VolumeMounts, extraMount)
+		// The command is /bin/bash -c "cmd1 && cmd2 ..."; append to the script.
+		if len(c.Command) == 3 && c.Command[0] == "/bin/bash" && c.Command[1] == "-c" {
+			pod.Spec.InitContainers[i].Command[2] = c.Command[2] + " && " + strings.Join(extraCmds, " && ")
+		}
+		break
+	}
 }
 
 // privateVolumeName returns the name of the volume that the compute container
