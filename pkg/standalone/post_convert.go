@@ -10,28 +10,25 @@ import (
 // ApplyPostConvertFixups is step 7: post-quadlet fixups applied directly to the
 // generated INI text. Currently handles:
 //   - PublishPort injection into the pod unit when a VNC or serial proxy is enabled.
-//   - Passt binary patch: PATH override + SecurityLabelDisable for the compute container.
+//   - Passt binary patch: PATH override for the compute container when --passt-workarounds.
 func ApplyPostConvertFixups(files []quadlet.UnitFile, vmName string, standaloneOpts Options, convOpts quadlet.Options) ([]quadlet.UnitFile, error) {
 	files = injectPodPublishPorts(files, vmName, standaloneOpts)
 
 	if convOpts.PasstWorkarounds {
-		files = injectPasstBinaryEnv(files, vmName)
+		files = injectPasstBinaryPath(files, vmName)
 	}
 
 	return files, nil
 }
 
-// injectPasstBinaryEnv prepends /passt-bin to PATH in the compute container so
+// injectPasstBinaryPath prepends /passt-bin to PATH in the compute container so
 // that libvirt's virFindFileInPath("passt") picks up the wrapper written by the
 // passt-binary-patcher init container before the unpatched /usr/bin/passt.
 // The wrapper calls /passt-bin/passt.avx2.patched (the patched binary in the
 // shared emptyDir volume).
-// SecurityLabelDisable=true is required so SELinux does not block execution of
-// the binaries written into the tmpfs-backed named volume at runtime.
-func injectPasstBinaryEnv(files []quadlet.UnitFile, vmName string) []quadlet.UnitFile {
+func injectPasstBinaryPath(files []quadlet.UnitFile, vmName string) []quadlet.UnitFile {
 	computeName := vmName + "-compute.container"
-	extra := "SecurityLabelDisable=true\n" +
-		"Environment=PATH=/passt-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
+	extra := "Environment=PATH=/passt-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
 	for i, f := range files {
 		if f.Name != computeName {
 			continue

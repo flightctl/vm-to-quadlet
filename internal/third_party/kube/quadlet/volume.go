@@ -127,9 +127,14 @@ func applyEmptyDirMount(unit *parser.UnitFile, m v1.VolumeMount, volName, prefix
 	// making the volume volatile (data clears on each pod start).
 	// The ".volume" suffix on the reference tells Quadlet to use the managed
 	// volume (systemd-<name>) rather than creating a new plain named volume.
+	//
+	// :z triggers a shared SELinux relabel of the volume at mount time,
+	// changing the label from tmpfs_t to container_file_t. This allows
+	// container_t processes to create UNIX sockets and execute binaries
+	// inside these tmpfs volumes without disabling SELinux confinement.
 	anonVol := fmt.Sprintf("%s-%s-empty", prefix, volName)
 	unit.Add(quadlet.ContainerGroup, quadlet.KeyVolume,
-		fmt.Sprintf("%s.volume:%s", anonVol, m.MountPath))
+		fmt.Sprintf("%s.volume:%s:z", anonVol, m.MountPath))
 	return nil
 }
 
