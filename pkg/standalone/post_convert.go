@@ -1,48 +1,73 @@
 package standalone
 
 import (
-	_ "embed"
 	"fmt"
 	"strings"
 
 	"github.com/flightctl/vm-to-quadlet/pkg/quadlet"
 )
 
-//go:embed passt-workaround-hook.sh
-var passtWorkaroundHook string
+// ApplyPostConvertFixups is step 7: post-quadlet fixups applied directly to the
+// generated INI text. Currently handles:
+//   - PublishPort injection into the pod unit when a VNC or serial proxy is enabled.
+//   - Passt binary patch: PATH override + SecurityLabelDisable for the compute container.
+func ApplyPostConvertFixups(files []quadlet.UnitFile, vmName string, standaloneOpts Options, convOpts quadlet.Options) ([]quadlet.UnitFile, error) {
+	files = injectPodPublishPorts(files, vmName, standaloneOpts)
 
-// ApplyPostConvertFixups is step 7: injects the passt workaround libvirt hook
-// when opts.PasstWorkarounds is enabled. vmName is used to derive the hook
-// script filename and the compute container unit name.
-func ApplyPostConvertFixups(files []quadlet.UnitFile, vmName string, opts quadlet.Options) ([]quadlet.UnitFile, error) {
-	if !opts.PasstWorkarounds {
-		return files, nil
+	if convOpts.PasstWorkarounds {
+		files = injectPasstBinaryEnv(files, vmName)
 	}
-
-	hookName := vmName + "-libvirt-hook.sh"
-	hookPath := opts.ScriptDir + "/" + hookName
-	files = injectPasstWorkaroundHook(files, vmName, hookPath)
-	files = append(files, quadlet.UnitFile{
-		Name:    hookName,
-		Content: passtWorkaroundHook,
-	})
 
 	return files, nil
 }
 
-// injectPasstWorkaroundHook finds the compute .container file and:
-//   - bind-mounts the workaround hook script over /etc/libvirt/hooks/qemu
-//   - disables SELinux confinement so SCM_RIGHTS fd-passing between QEMU and passt
-//     is not blocked by the host MAC policy (required by the hook's XML manipulation)
-func injectPasstWorkaroundHook(files []quadlet.UnitFile, vmName, hookPath string) []quadlet.UnitFile {
+// injectPasstBinaryEnv prepends /passt-bin to PATH in the compute container so
+// that libvirt's virFindFileInPath("passt") picks up the wrapper written by the
+// passt-binary-patcher init container before the unpatched /usr/bin/passt.
+// The wrapper calls /passt-bin/passt.avx2.patched (the patched binary in the
+// shared emptyDir volume).
+// SecurityLabelDisable=true is required so SELinux does not block execution of
+// the binaries written into the tmpfs-backed named volume at runtime.
+func injectPasstBinaryEnv(files []quadlet.UnitFile, vmName string) []quadlet.UnitFile {
 	computeName := vmName + "-compute.container"
+	extra := "SecurityLabelDisable=true\n" +
+		"Environment=PATH=/passt-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
 	for i, f := range files {
 		if f.Name != computeName {
 			continue
 		}
-		extra := fmt.Sprintf("Volume=%s:/etc/libvirt/hooks/qemu:z,exec\n", hookPath) +
-			"SecurityLabelDisable=true\n"
 		files[i].Content = insertBeforeSection(f.Content, "Service", extra)
+		return files
+	}
+	return files
+}
+
+// injectPodPublishPorts stamps PublishPort= lines into the generated .pod unit
+// for each proxy port that was requested. Quadlet requires these on the pod,
+// not on the individual container.
+func injectPodPublishPorts(files []quadlet.UnitFile, vmName string, opts Options) []quadlet.UnitFile {
+	var ports []string
+	if opts.AddVNCProxy {
+		ports = append(ports, fmt.Sprintf("%d:%d", opts.VNCPort, opts.VNCPort))
+	}
+	if opts.AddSerialProxy {
+		ports = append(ports, fmt.Sprintf("%d:%d", opts.SerialPort, opts.SerialPort))
+	}
+	if len(ports) == 0 {
+		return files
+	}
+
+	podName := vmName + ".pod"
+	extra := ""
+	for _, p := range ports {
+		extra += fmt.Sprintf("PublishPort=%s\n", p)
+	}
+
+	for i, f := range files {
+		if f.Name != podName {
+			continue
+		}
+		files[i].Content = insertBeforeSection(f.Content, "Install", extra)
 		return files
 	}
 	return files

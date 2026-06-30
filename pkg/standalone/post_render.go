@@ -46,6 +46,10 @@ func AdaptForStandalone(pod *k8sv1.Pod, prepared *PreparedVM, opts Options) (*k8
 
 	injectVirtHandlerDirInit(pod, opts.LauncherImage)
 
+	if opts.PasstWorkarounds {
+		injectPasstBinaryPatcher(pod, opts)
+	}
+
 	// Inject persistent PVC-backed volumes for state that must survive pod
 	// restarts. All other runtime paths under /var/run/kubevirt-private are
 	// ephemeral emptyDir (tmpfs). The two sub-paths below overlay on top of
@@ -121,62 +125,97 @@ func injectComputeReadinessProbe(pod *k8sv1.Pod, vmi *virtv1.VirtualMachineInsta
 	}
 }
 
-// injectPersistentStateVolumes adds PVC-backed volume mounts for the two
-// sub-paths of /var/run/kubevirt-private that must persist across pod restarts:
-// UEFI NVRAM and the swtpm CA certificate store. All other paths under
-// kubevirt-private are covered by the tmpfs-backed emptyDir.
+// injectPersistentStateVolumes mirrors KubeVirt's backend-storage design: a
+// single PVC ("vm-state") holds all persistent sub-state under
+// /var/run/kubevirt-private that must survive pod restarts, using SubPath
+// mounts to direct each piece to the correct location.
+//
+// Three sub-paths are persisted (matching upstream rendervolumes.go):
+//
+//	nvram        → UEFI NVRAM / EFI variables (boot order, Secure Boot state)
+//	swtpm-localca → swtpm CA certificate chain (issues the TPM EK certificate)
+//	swtpm        → swtpm NV storage (tpm2-00.permall, EK, persistent handles)
+//
+// All three live inside the private emptyDir (tmpfs) and would be wiped on
+// every pod restart without this overlay. Losing swtpm resets the TPM
+// identity; losing nvram resets EFI variables. Both break BitLocker and
+// Windows activation on restart.
+//
+// Two intermediate emptyDir volumes (private-libvirt, private-libvirt-qemu)
+// are also added, matching KubeVirt's approach for non-root VMIs: without them,
+// the directories at those paths would be owned by root:fsGroup with 0755,
+// blocking write access by the qemu user (uid 107).
 func injectPersistentStateVolumes(pod *k8sv1.Pod, vmi *virtv1.VirtualMachineInstance) {
-	type persistentPath struct {
-		volName   string
-		claimName string
-		mountPath string
-	}
+	const vmStateVol = "vm-state"
+	claimName := vmi.Name + "-vm-state"
 
-	vmName := vmi.Name
-	paths := []persistentPath{
-		{
-			volName:   "nvram",
-			claimName: vmName + "-nvram",
-			mountPath: "/var/run/kubevirt-private/libvirt/qemu/nvram",
-		},
-		{
-			volName:   "swtpm-ca",
-			claimName: vmName + "-swtpm-ca",
-			mountPath: "/var/run/kubevirt-private/var/lib/swtpm-localca",
-		},
-	}
-
-	for _, p := range paths {
-		pod.Spec.Volumes = append(pod.Spec.Volumes, k8sv1.Volume{
-			Name: p.volName,
+	pod.Spec.Volumes = append(pod.Spec.Volumes,
+		k8sv1.Volume{
+			Name: vmStateVol,
 			VolumeSource: k8sv1.VolumeSource{
 				PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
-					ClaimName: p.claimName,
+					ClaimName: claimName,
 				},
 			},
-		})
-		for i, c := range pod.Spec.Containers {
-			if c.Name == "compute" {
-				pod.Spec.Containers[i].VolumeMounts = append(c.VolumeMounts, k8sv1.VolumeMount{
-					Name:      p.volName,
-					MountPath: p.mountPath,
-				})
-				break
+		},
+		// Intermediate emptyDir volumes so the qemu user (uid 107) can write
+		// into the sub-paths that the vm-state PVC is mounted at.
+		k8sv1.Volume{
+			Name:         "private-libvirt",
+			VolumeSource: k8sv1.VolumeSource{EmptyDir: &k8sv1.EmptyDirVolumeSource{}},
+		},
+		k8sv1.Volume{
+			Name:         "private-libvirt-qemu",
+			VolumeSource: k8sv1.VolumeSource{EmptyDir: &k8sv1.EmptyDirVolumeSource{}},
+		},
+	)
+
+	mounts := []k8sv1.VolumeMount{
+		// Intermediate emptyDir mounts (must come before the SubPath PVC mounts
+		// so the directories exist with correct ownership when PVC is overlaid).
+		{Name: "private-libvirt", MountPath: "/var/run/kubevirt-private/libvirt"},
+		{Name: "private-libvirt-qemu", MountPath: "/var/run/kubevirt-private/libvirt/qemu"},
+		// Persistent state sub-paths from the single vm-state PVC.
+		{Name: vmStateVol, MountPath: "/var/run/kubevirt-private/libvirt/qemu/nvram", SubPath: "nvram"},
+		{Name: vmStateVol, MountPath: "/var/run/kubevirt-private/libvirt/qemu/swtpm", SubPath: "swtpm"},
+		{Name: vmStateVol, MountPath: "/var/run/kubevirt-private/var/lib/swtpm-localca", SubPath: "swtpm-localca"},
+	}
+
+	for i, c := range pod.Spec.Containers {
+		if c.Name == "compute" {
+			pod.Spec.Containers[i].VolumeMounts = append(c.VolumeMounts, mounts...)
+			break
+		}
+	}
+}
+
+// privateVolumeName returns the name of the volume that the compute container
+// mounts at /var/run/kubevirt-private. This is the canonical way to locate
+// the private emptyDir regardless of how KubeVirt names it.
+//
+// The "compute" container is always present at this point: it is produced by
+// RenderLaunchManifest (step 4) under that exact hardcoded name and this
+// function is called before any cleanup that touches containers. The empty
+// return is a defensive fallback that should never be reached in practice.
+func privateVolumeName(pod *k8sv1.Pod) string {
+	const privatePath = "/var/run/kubevirt-private"
+	for _, c := range pod.Spec.Containers {
+		if c.Name != "compute" {
+			continue
+		}
+		for _, m := range c.VolumeMounts {
+			if m.MountPath == privatePath {
+				return m.Name
 			}
 		}
 	}
+	return ""
 }
 
 // injectVNCProxy adds a socat sidecar that forwards the VNC Unix socket
 // (/var/run/kubevirt-private/default/virt-vnc) to TCP inside the pod.
 func injectVNCProxy(pod *k8sv1.Pod, port int, image string) {
-	privateVolName := ""
-	for _, v := range pod.Spec.Volumes {
-		if strings.Contains(v.Name, "private") {
-			privateVolName = v.Name
-			break
-		}
-	}
+	privateVolName := privateVolumeName(pod)
 	if privateVolName == "" {
 		return
 	}
@@ -196,13 +235,7 @@ func injectVNCProxy(pod *k8sv1.Pod, port int, image string) {
 }
 
 func addConsoleProxySidecar(pod *k8sv1.Pod, proxyPort int, image string) {
-	privateVolName := ""
-	for _, v := range pod.Spec.Volumes {
-		if strings.Contains(v.Name, "private") {
-			privateVolName = v.Name
-			break
-		}
-	}
+	privateVolName := privateVolumeName(pod)
 	if privateVolName == "" {
 		return
 	}
@@ -535,59 +568,176 @@ fi`, diskPath, m.sizeBytes)
 // /var/run/kubevirt-private and /var/run/kubevirt/sockets before starting
 // virt-launcher. In standalone mode virt-handler does not run, so the init
 // container replaces that role.
+// injectVirtHandlerDirInit prepends an init container that replicates the
+// per-pod directory setup that virt-handler performs on real KubeVirt nodes,
+// and also enforces Kubernetes emptyDir semantics for Podman named volumes.
+//
+// # virt-handler role
+//
+// In a full KubeVirt cluster, virt-handler (the per-node agent) initialises
+// /var/run/kubevirt-private and /var/run/kubevirt/sockets before starting
+// virt-launcher. In standalone mode virt-handler does not run, so the init
+// container replaces that role by pre-creating subdirectories that
+// virt-launcher expects to exist (e.g. libvirt/qemu, sockets) before it
+// drops privileges to uid 107 (qemu).
+//
+// # emptyDir lifecycle
+//
+// In Kubernetes, emptyDir volumes are always freshly provisioned when a pod
+// is scheduled; they are never shared between different pod lifetimes. Podman
+// named volumes persist indefinitely, so without intervention, stale libvirt
+// and QEMU runtime state (domain XML, dead monitor sockets, PID files) from a
+// previous run survives into the next start and causes QEMU to crash
+// immediately when virtqemud tries to reconnect to a dead process.
+//
+// The init container therefore:
+//  1. Mounts every emptyDir volume at a flat /emptydir/<name> path (avoiding
+//     nested mount conflicts with the main container's mounts).
+//  2. Wipes the volume contents with find -mindepth 1 -delete, matching the
+//     Kubernetes guarantee that emptyDir is fresh on every pod start.
+//  3. Recreates the specific subdirectory structure that virt-launcher expects
+//     before it drops privileges to uid 107 (qemu).
+//
+// Persistent volumes (nvram, swtpm-ca, rootdisk) do not have EmptyDir set and
+// are never mounted here, so their data is never touched.
+// injectVirtHandlerDirInit prepends an init container that replicates the
+// per-pod directory setup that virt-handler performs on real KubeVirt nodes.
+//
+// In a full KubeVirt cluster, virt-handler (the per-node agent) initialises
+// /var/run/kubevirt-private and /var/run/kubevirt/sockets before virt-launcher
+// starts. In standalone mode virt-handler does not run, so this init container
+// pre-creates the subdirectories that virt-launcher expects to exist before it
+// drops privileges to uid 107 (qemu).
+//
+// emptyDir volumes are Quadlet tmpfs-backed named volumes. Because tmpfs is
+// fresh on every pod start, no wipe is needed here — the subdirectory setup is
+// the only thing required.
 func injectVirtHandlerDirInit(pod *k8sv1.Pod, launcherImage string) {
-	type dirSpec struct {
-		volNameSubstr string
-		mountPath     string
-		mkdirPaths    []string
-	}
-
-	specs := []dirSpec{
-		{
-			volNameSubstr: "private",
-			mountPath:     "/var/run/kubevirt-private",
-			mkdirPaths:    []string{"/var/run/kubevirt-private/libvirt/qemu"},
-		},
-		{
-			volNameSubstr: "sockets",
-			mountPath:     "/var/run/kubevirt/sockets",
-			mkdirPaths:    []string{"/var/run/kubevirt/sockets"},
-		},
+	// emptyDir volumes that require specific subdirectories to exist before
+	// virt-launcher starts (relative to the volume root).
+	subdirsForVol := map[string][]string{
+		"private": {"libvirt/qemu"},
 	}
 
 	qemuUID := int64(107)
 	var mounts []k8sv1.VolumeMount
-	var allPaths []string
+	var cmds []string
 
-	for _, spec := range specs {
-		for _, v := range pod.Spec.Volumes {
-			if v.EmptyDir == nil {
-				continue
-			}
-			if strings.Contains(v.Name, spec.volNameSubstr) {
-				mounts = append(mounts, k8sv1.VolumeMount{
-					Name:      v.Name,
-					MountPath: spec.mountPath,
-				})
-				allPaths = append(allPaths, spec.mkdirPaths...)
-				break
-			}
+	for _, v := range pod.Spec.Volumes {
+		if v.EmptyDir == nil {
+			continue
+		}
+		subdirs, ok := subdirsForVol[volumeKey(v.Name)]
+		if !ok {
+			continue
+		}
+		mountPath := "/emptydir/" + v.Name
+		mounts = append(mounts, k8sv1.VolumeMount{
+			Name:      v.Name,
+			MountPath: mountPath,
+		})
+		for _, sub := range subdirs {
+			cmds = append(cmds, fmt.Sprintf("mkdir -p %s/%s", mountPath, sub))
 		}
 	}
 
-	if len(allPaths) == 0 {
+	if len(cmds) == 0 {
 		return
 	}
 
 	pod.Spec.InitContainers = append([]k8sv1.Container{
 		{
-			Name:            "virt-handler-dir-init",
-			Image:           launcherImage,
-			Command:         []string{"/bin/bash", "-c", "mkdir -p " + strings.Join(allPaths, " ")},
-			VolumeMounts:    mounts,
+			Name:    "virt-handler-dir-init",
+			Image:   launcherImage,
+			Command: []string{"/bin/bash", "-c", strings.Join(cmds, " && ")},
+			VolumeMounts: mounts,
 			SecurityContext: &k8sv1.SecurityContext{RunAsUser: &qemuUID},
 		},
 	}, pod.Spec.InitContainers...)
+}
+
+// volumeKey extracts the logical volume name used as a key into subdirsForVol.
+// Quadlet-generated volume names follow the pattern <prefix>-<key>-empty; we
+// want the middle segment (e.g. "private" from "virt-launcher-foo-private-empty").
+func volumeKey(volumeName string) string {
+	if strings.HasSuffix(volumeName, "-empty") {
+		trimmed := strings.TrimSuffix(volumeName, "-empty")
+		if idx := strings.LastIndex(trimmed, "-"); idx >= 0 {
+			return trimmed[idx+1:]
+		}
+	}
+	return volumeName
+}
+
+// injectPasstBinaryPatcher adds an init container that patches the passt.avx2
+// binary for the mrg_rxbuf crash (passt versions predating PR #18235), and
+// mounts the result into the compute container via a shared emptyDir volume.
+//
+// The patched binary and a thin wrapper are written to an emptyDir volume named
+// "passt-bin" mounted at /passt-bin/ in both the init and compute containers.
+// Step 7 (ApplyPostConvertFixups) then prepends /passt-bin to PATH in the
+// compute container's environment so that libvirt's virFindFileInPath("passt")
+// picks up the wrapper before /usr/bin/passt.
+//
+// The wrapper calls /passt-bin/passt.avx2.patched (absolute path within the
+// shared volume), avoiding any dependency on the host output directory.
+func injectPasstBinaryPatcher(pod *k8sv1.Pod, opts Options) {
+	// Pure-sh binary patch using dd + od — no Python or perl required.
+	// The virt-launcher image contains dd, od, cp, and printf but not python3.
+	//
+	// Offset 0x2815d (decimal 164189): start of a jae rel32 instruction that
+	// branches to the abort path when the passt scattergather list overflows.
+	// We overwrite the 4-byte operand at 0x2815f (164191) with 0x58000000
+	// (little-endian 88) to redirect the jump to 0x281bb (the truncation epilogue).
+	// This is specific to passt 0^20250512.g8ec1341. If the binary doesn't match
+	// we copy it unpatched so the wrapper still works (no crash for 1-vCPU guests).
+	script := "set -e\n" +
+		"SRC=/usr/bin/passt.avx2\n" +
+		"OUT=/passt-bin/passt.avx2.patched\n" +
+		"cp \"$SRC\" \"$OUT\"\n" +
+		"chmod +x \"$OUT\"\n" +
+		// Read 6 bytes at 0x2815d and compare against the known jae opcode.
+		"EXPECTED=0f83d2000000\n" +
+		"ACTUAL=$(dd if=\"$SRC\" bs=1 skip=164189 count=6 2>/dev/null | od -A n -t x1 | tr -d ' \\n')\n" +
+		"if [ \"$ACTUAL\" = \"$EXPECTED\" ]; then\n" +
+		// Write the patched 4-byte operand at 0x2815f.
+		"    printf '\\x58\\x00\\x00\\x00' | dd of=\"$OUT\" bs=1 seek=164191 conv=notrunc 2>/dev/null\n" +
+		"    echo 'Patched passt.avx2 OK'\n" +
+		"else\n" +
+		"    echo \"Warning: passt.avx2 version not recognized (got $ACTUAL); using unpatched binary\" >&2\n" +
+		"fi\n" +
+		"printf '#!/bin/sh\\nexec /passt-bin/passt.avx2.patched \"$@\"\\n' > /passt-bin/passt\n" +
+		"chmod +x /passt-bin/passt\n"
+
+	const passtBinVol = "passt-bin"
+	rootUID := int64(0)
+
+	pod.Spec.Volumes = append(pod.Spec.Volumes, k8sv1.Volume{
+		Name:         passtBinVol,
+		VolumeSource: k8sv1.VolumeSource{EmptyDir: &k8sv1.EmptyDirVolumeSource{}},
+	})
+
+	pod.Spec.InitContainers = append(pod.Spec.InitContainers, k8sv1.Container{
+		Name:    "passt-binary-patcher",
+		Image:   opts.LauncherImage,
+		Command: []string{"/bin/sh", "-c", script},
+		VolumeMounts: []k8sv1.VolumeMount{
+			{Name: passtBinVol, MountPath: "/passt-bin"},
+		},
+		SecurityContext: &k8sv1.SecurityContext{RunAsUser: &rootUID},
+	})
+
+	for i, c := range pod.Spec.Containers {
+		if c.Name != "compute" {
+			continue
+		}
+		pod.Spec.Containers[i].VolumeMounts = append(c.VolumeMounts, k8sv1.VolumeMount{
+			Name:      passtBinVol,
+			MountPath: "/passt-bin",
+			ReadOnly:  true,
+		})
+		break
+	}
 }
 
 func cleanupForStandalone(pod *k8sv1.Pod, vmi *virtv1.VirtualMachineInstance) {

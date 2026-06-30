@@ -12,7 +12,7 @@ import (
 	virtv1 "kubevirt.io/api/core/v1"
 )
 
-// Options controls standalone-mode behaviour for steps 3 and 5.
+// Options controls standalone-mode behaviour for steps 3, 5, and 7.
 type Options struct {
 	LauncherImage  string
 	AddVNCProxy    bool
@@ -21,6 +21,11 @@ type Options struct {
 	AddSerialProxy bool
 	SerialPort     int
 	SerialImage    string
+
+	// PasstWorkarounds enables the passt binary patch init container (step 5)
+	// and the libvirt hook injection (step 7) for known passt bugs in older
+	// virt-launcher images (pre-0^20260611.ga9c61ff / pre-PR #18235).
+	PasstWorkarounds bool
 }
 
 // PreparedVM is the output of PrepareForRendering (step 3).

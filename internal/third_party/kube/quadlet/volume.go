@@ -31,7 +31,10 @@ func applyMount(unit *parser.UnitFile, m v1.VolumeMount, src v1.VolumeSource, pr
 	}
 }
 
-// mountOptions builds the mount options string from a VolumeMount.
+// mountOptions builds the -v options string from a VolumeMount.
+// SubPath is intentionally excluded: PVC mounts with SubPath use Mount=
+// (--mount type=volume,subpath=...) instead of Volume= (-v), because
+// Podman's -v syntax does not support the subpath= option.
 func mountOptions(m v1.VolumeMount) string {
 	var opts []string
 	if m.ReadOnly {
@@ -46,9 +49,6 @@ func mountOptions(m v1.VolumeMount) string {
 		case v1.MountPropagationNone:
 			opts = append(opts, "private")
 		}
-	}
-	if m.SubPath != "" {
-		opts = append(opts, "subpath="+m.SubPath)
 	}
 	return strings.Join(opts, ",")
 }
@@ -96,6 +96,21 @@ func applyHostPathMount(unit *parser.UnitFile, m v1.VolumeMount, hp *v1.HostPath
 
 func applyPVCMount(unit *parser.UnitFile, m v1.VolumeMount, pvc *v1.PersistentVolumeClaimVolumeSource, prefix string) error {
 	volName := fmt.Sprintf("%s-%s.volume", prefix, m.Name)
+
+	if m.SubPath != "" {
+		// Podman's -v short syntax does not support subpath=; use --mount
+		// type=volume instead. resolveContainerMountParams resolves the
+		// .volume unit reference and adds the correct Requires=/After=
+		// dependencies, identical to what Volume= would produce.
+		mountStr := fmt.Sprintf("type=volume,source=%s,destination=%s,subpath=%s",
+			volName, m.MountPath, m.SubPath)
+		if m.ReadOnly {
+			mountStr += ",ro"
+		}
+		unit.Add(quadlet.ContainerGroup, quadlet.KeyMount, mountStr)
+		return nil
+	}
+
 	vol := volName + ":" + m.MountPath
 	if opts := mountOptions(m); opts != "" {
 		vol += ":" + opts

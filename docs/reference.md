@@ -101,13 +101,19 @@ container replaces that role; without it `virt-launcher` fails with
 
 #### `injectPersistentStateVolumes`
 
-Adds two `PersistentVolumeClaim` volumes on the compute container that overlay
-paths inside the `private` emptyDir with persistent named Podman volumes:
+Adds a single `PersistentVolumeClaim` volume (`vm-state`, claim
+`<vm-name>-vm-state`) with three SubPath mounts on the compute container,
+overlaying paths inside the `private` emptyDir with persistent named Podman
+volume storage:
 
-| Volume | Claim name | Mount path | Persists |
-|---|---|---|---|
-| `nvram` | `<vm-name>-nvram` | `/var/run/kubevirt-private/libvirt/qemu/nvram` | UEFI EFI variables / boot order |
-| `swtpm-ca` | `<vm-name>-swtpm-ca` | `/var/run/kubevirt-private/var/lib/swtpm-localca` | TPM CA chain (BitLocker, Windows activation) |
+| SubPath | Mount path | Persists |
+|---|---|---|
+| `nvram` | `/var/run/kubevirt-private/libvirt/qemu/nvram` | UEFI EFI variables / boot order |
+| `swtpm` | `/var/run/kubevirt-private/libvirt/qemu/swtpm` | TPM NV storage (`tpm2-00.permall`) |
+| `swtpm-localca` | `/var/run/kubevirt-private/var/lib/swtpm-localca` | TPM CA chain (BitLocker, Windows activation) |
+
+Two intermediate emptyDir volumes (`private-libvirt`, `private-libvirt-qemu`)
+are also added so the qemu user (UID 107) can write into the SubPath directories.
 
 #### `populateInterfaceStatus`
 

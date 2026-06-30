@@ -88,15 +88,13 @@ type Options struct {
 	// When empty a placeholder is emitted and the user must set the correct path.
 	ScriptDir string
 
-	// PasstWorkarounds enables injection of a libvirt QEMU hook that applies
-	// workarounds for known passt bugs present in older virt-launcher images:
-	//   - mrg_rxbuf=off: disables mergeable RX buffers to prevent a passt crash
-	//     with 2+ vCPU Windows guests (fixed in passt 0^20260611.ga9c61ff).
-	//   - portForward patch: replaces empty <portForward> elements in the domain
-	//     XML with explicit port ranges to avoid passt exhausting fs.file-max
-	//     (not needed when ports are declared in the VM interface spec).
-	// Enable this only when running against an image that predates PR #18235
-	// (https://github.com/kubevirt/kubevirt/pull/18235).
+	// PasstWorkarounds enables the passt.avx2 binary patch init container that
+	// prevents a passt crash with 2+ vCPU guests due to the mrg_rxbuf scattergather
+	// overflow bug (fixed upstream in passt 0^20260611.ga9c61ff / PR #18235).
+	// The init container patches the binary from the virt-launcher image at pod
+	// startup and exposes it via /passt-bin in the compute container's PATH.
+	// Enable this only when running against a virt-launcher image that predates
+	// passt 0^20260611.ga9c61ff.
 	PasstWorkarounds bool
 }
 

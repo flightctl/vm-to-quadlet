@@ -234,8 +234,9 @@ func validateForStandalone(vm *virtv1.VirtualMachine) error {
 		if vol.DataVolume != nil {
 			if !dvTemplateNames[vol.DataVolume.Name] {
 				warnings = append(warnings, fmt.Sprintf(
-					"volume %q references DataVolume %q but no matching dataVolumeTemplate found — "+
-						"disk will not be auto-created; ensure the disk image exists before starting the VM",
+					"volume %q references DataVolume %q with no dataVolumeTemplate — "+
+						"converter treats this as a reference to an existing named volume; "+
+						"the Podman volume must contain disk.img before the VM starts",
 					vol.Name, vol.DataVolume.Name))
 			}
 			continue

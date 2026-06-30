@@ -4,6 +4,18 @@ metadata:
   name: windows-vm
 spec:
   running: true
+  dataVolumeTemplates:
+  - metadata:
+      name: rootdisk
+    spec:
+      # blank source: converter creates an empty disk image on first boot.
+      # If disk.img already exists in the named volume it is left untouched.
+      source:
+        blank: {}
+      storage:
+        resources:
+          requests:
+            storage: 60Gi
   template:
     spec:
       domain:
@@ -48,6 +60,16 @@ spec:
             cache: writeback
             dedicatedIOThread: true
             name: rootdisk
+            bootOrder: 2
+          - cdrom:
+              bus: sata
+              readonly: true
+            name: windows-iso
+            bootOrder: 1
+          - cdrom:
+              bus: sata
+              readonly: true
+            name: virtio-drivers
           interfaces:
           - masquerade: {}
             name: default
@@ -67,8 +89,14 @@ spec:
         pod: {}
       volumes:
       - name: rootdisk
+        dataVolume:
+          name: rootdisk
+      - name: windows-iso
         hostDisk:
-          # Path to the installed Windows disk image on the host.
-          # Use windows-install.yaml first to produce this image.
-          path: /path/to/windows-vm.img
+          path: /home/abennata/Downloads/Win11_25H2_English_x64_v2.iso
+          type: DiskOrFail
+      - name: virtio-drivers
+        hostDisk:
+          # Download from https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/
+          path: /home/abennata/Downloads/virtio-win.iso
           type: DiskOrFail
