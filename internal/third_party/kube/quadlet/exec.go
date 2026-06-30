@@ -5,7 +5,6 @@ package quadlet
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/flightctl/vm-to-quadlet/internal/third_party/systemd/parser"
 	"github.com/flightctl/vm-to-quadlet/internal/third_party/systemd/quadlet"
@@ -25,14 +24,14 @@ var scriptShells = map[string]bool{
 // Entrypoint=/bin/sh + Exec=/init.sh + Volume= bind-mount for the script.
 //
 // Returns the companion script file, or nil when no extraction occurred.
-func applyExec(unit *parser.UnitFile, command, args []string, prefix, name, scriptDir string) *GeneratedFile {
+func applyExec(unit *parser.UnitFile, command, args []string, prefix, name string) *GeneratedFile {
 	combined := append(command, args...) //nolint:gocritic // intentional: command is never reused after this call
 	if len(combined) == 0 {
 		return nil
 	}
 
 	if script, ok := isShellScript(combined); ok {
-		return applyShellScript(unit, script, prefix, name, scriptDir)
+		return applyShellScript(unit, script, prefix, name)
 	}
 
 	if len(command) > 0 {
@@ -59,17 +58,16 @@ func isShellScript(combined []string) (script string, ok bool) {
 }
 
 // applyShellScript handles the shell-script extraction path.
-func applyShellScript(unit *parser.UnitFile, script, prefix, name, scriptDir string) *GeneratedFile {
+func applyShellScript(unit *parser.UnitFile, script, prefix, name string) *GeneratedFile {
 	scriptName := fmt.Sprintf("%s-%s.sh", prefix, name)
-	dir := scriptDir
-	if dir == "" {
-		dir = "<SCRIPT_DIR>"
-	}
-	hostPath := filepath.Join(dir, scriptName)
 
+	// Use a relative path so the Volume= bind-mount is resolved by Quadlet
+	// relative to the unit file's own directory at runtime. This makes the
+	// generated units self-contained: they work regardless of where they are
+	// placed, as long as the .sh file lives next to the .container file.
 	unit.Set(quadlet.ContainerGroup, quadlet.KeyEntrypoint, "/bin/sh")
 	unit.Set(quadlet.ContainerGroup, quadlet.KeyExec, "/init.sh")
-	unit.Add(quadlet.ContainerGroup, quadlet.KeyVolume, fmt.Sprintf("%s:/init.sh:ro,z", hostPath))
+	unit.Add(quadlet.ContainerGroup, quadlet.KeyVolume, fmt.Sprintf("./%s:/init.sh:ro,z", scriptName))
 
 	return &GeneratedFile{
 		Name:    scriptName,

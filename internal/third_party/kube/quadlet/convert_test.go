@@ -868,7 +868,7 @@ func TestConvert_ExecCommand_ShellScript(t *testing.T) {
 	pod := minimalPod("p", "busybox")
 	pod.Spec.Containers[0].Command = []string{"/bin/sh", "-c"}
 	pod.Spec.Containers[0].Args = []string{"echo hello && sleep 1"}
-	files, err := Convert(pod, Options{ScriptDir: "/scripts"})
+	files, err := Convert(pod, Options{})
 	require.NoError(t, err)
 
 	scriptFile := findFile(files, "p-app.sh")
@@ -880,6 +880,10 @@ func TestConvert_ExecCommand_ShellScript(t *testing.T) {
 	assert.Equal(t, "/bin/sh", entrypoint)
 	exec, _ := cu.Unit.Lookup(quadlet.ContainerGroup, quadlet.KeyExec)
 	assert.Equal(t, "/init.sh", exec)
+
+	vols := cu.Unit.LookupAll(quadlet.ContainerGroup, quadlet.KeyVolume)
+	assert.Contains(t, vols, "./p-app.sh:/init.sh:ro,z",
+		"script must be bind-mounted via relative path so units are self-contained")
 }
 
 func TestConvert_EnvPlain(t *testing.T) {

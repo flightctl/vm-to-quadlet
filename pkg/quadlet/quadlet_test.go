@@ -742,9 +742,7 @@ if [ ! -f "$DISK" ]; then qemu-img create -f raw "$DISK" 10737418240; fi`
 		},
 	}
 
-	o := opts()
-	o.ScriptDir = "/etc/containers/systemd/myvm"
-	files, err := Convert(pod, o); require.NoError(t, err)
+	files, err := Convert(pod, opts()); require.NoError(t, err)
 
 	t.Run("init container produces its own .container file", func(t *testing.T) {
 		requireFile(t, files, "myvm-init-disk-datadisk.container")
@@ -776,10 +774,10 @@ if [ ! -f "$DISK" ]; then qemu-img create -f raw "$DISK" 10737418240; fi`
 		require.NotContains(t, f.Content, "_INIT_SCRIPT")
 	})
 
-	t.Run("script is bind-mounted into the container using ScriptDir", func(t *testing.T) {
+	t.Run("script is bind-mounted using a relative path (self-contained)", func(t *testing.T) {
 		f := requireFile(t, files, "myvm-init-disk-datadisk.container")
 		require.Contains(t, f.Content,
-			"Volume=/etc/containers/systemd/myvm/myvm-init-disk-datadisk.sh:/init.sh:ro,z")
+			"Volume=./myvm-init-disk-datadisk.sh:/init.sh:ro,z")
 	})
 
 	t.Run("init container mounts PVC volume", func(t *testing.T) {
@@ -802,12 +800,6 @@ if [ ! -f "$DISK" ]; then qemu-img create -f raw "$DISK" 10737418240; fi`
 		require.NotContains(t, f.Content, "Requires=")
 	})
 
-	t.Run("placeholder path used when ScriptDir is empty", func(t *testing.T) {
-		files2, err := Convert(pod, opts()); require.NoError(t, err)
-		f := requireFile(t, files2, "myvm-init-disk-datadisk.container")
-		require.Contains(t, f.Content, "<SCRIPT_DIR>/myvm-init-disk-datadisk.sh:/init.sh:ro,z")
-		require.Contains(t, f.Content, "Entrypoint=/bin/sh")
-	})
 }
 
 func TestConvert_MultipleInitContainers(t *testing.T) {

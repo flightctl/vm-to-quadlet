@@ -23,7 +23,7 @@ func buildContainerUnit(c v1.Container, pod *v1.Pod, opts Options) ([]*Generated
 	unit.Set(quadlet.UnitGroup, "Description",
 		fmt.Sprintf("Container %s for pod %s", c.Name, pod.Name))
 
-	// §6.1 Identity
+	// ?6.1 Identity
 	unit.Set(quadlet.ContainerGroup, quadlet.KeyImage, c.Image)
 
 	if c.ImagePullPolicy != "" {
@@ -35,32 +35,32 @@ func buildContainerUnit(c v1.Container, pod *v1.Pod, opts Options) ([]*Generated
 		unit.Set(quadlet.ContainerGroup, quadlet.KeyWorkingDir, c.WorkingDir)
 	}
 
-	// §6.2 Command & args
-	scriptFile := applyExec(unit, c.Command, c.Args, opts.NamePrefix, c.Name, opts.ScriptDir)
+	// ?6.2 Command & args
+	scriptFile := applyExec(unit, c.Command, c.Args, opts.NamePrefix, c.Name)
 
-	// §6.3 Environment (large values collected for env file)
+	// ?6.3 Environment (large values collected for env file)
 	envLines, err := applyEnv(unit, c.Env, c.EnvFrom, pod, &c, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	// §6.4 Security context
+	// ?6.4 Security context
 	applySecurityContext(unit, c.SecurityContext, pod.Spec.SecurityContext)
 	// Pod-level supplemental groups are applied to every container.
 	applySupplementalGroups(unit, pod.Spec.SecurityContext)
 
-	// §6.5 Resources
+	// ?6.5 Resources
 	applyResources(unit, c.Resources)
 
-	// §6.6 Volumes (ConfigMap/Secret handled via applyConfigMapVolume/applySecretVolume below)
+	// ?6.6 Volumes (ConfigMap/Secret handled via applyConfigMapVolume/applySecretVolume below)
 	if err := applyVolumeMountsWithConfigSecrets(unit, c.VolumeMounts, pod.Spec.Volumes, opts); err != nil {
 		return nil, err
 	}
 
-	// §6.7 Health probes
+	// ?6.7 Health probes
 	applyProbes(unit, c.LivenessProbe, c.ReadinessProbe, c.StartupProbe, pod.Spec.RestartPolicy)
 
-	// §6.9 Ports — not published, just a comment
+	// ?6.9 Ports ? not published, just a comment
 	if len(c.Ports) > 0 {
 		unit.AddComment(quadlet.ContainerGroup, "Ports declared in pod spec (not published by default):")
 		for _, p := range c.Ports {
@@ -75,7 +75,7 @@ func buildContainerUnit(c v1.Container, pod *v1.Pod, opts Options) ([]*Generated
 		unit.AddComment(quadlet.ContainerGroup, "PublishPort=<hostPort>:<containerPort>")
 	}
 
-	// §6.1 tty / stdin
+	// ?6.1 tty / stdin
 	if c.TTY {
 		unit.Add(quadlet.ContainerGroup, quadlet.KeyPodmanArgs, "--tty")
 	}
@@ -83,7 +83,7 @@ func buildContainerUnit(c v1.Container, pod *v1.Pod, opts Options) ([]*Generated
 		unit.Add(quadlet.ContainerGroup, quadlet.KeyPodmanArgs, "--interactive")
 	}
 
-	// §6.8 Lifecycle
+	// ?6.8 Lifecycle
 	if c.Lifecycle != nil && c.Lifecycle.StopSignal != nil {
 		unit.Set(quadlet.ContainerGroup, quadlet.KeyStopSignal, *c.Lifecycle.StopSignal)
 	}
@@ -93,7 +93,7 @@ func buildContainerUnit(c v1.Container, pod *v1.Pod, opts Options) ([]*Generated
 		result = append(result, scriptFile)
 	}
 
-	// §6.3 Env file
+	// ?6.3 Env file
 	if len(envLines) > 0 {
 		envFileName := fmt.Sprintf("%s-%s.env", opts.NamePrefix, c.Name)
 		unit.Add(quadlet.ContainerGroup, quadlet.KeyEnvironmentFile, envFileName)

@@ -20,11 +20,6 @@ type Options struct {
 	// Empty string omits the directive (Podman default: pasta for rootless, bridge for root).
 	Network string
 
-	// ScriptDir is the absolute host path where generated .sh init scripts will live.
-	// Used to build the Volume= bind-mount path in init container units.
-	// When empty a placeholder "<SCRIPT_DIR>" is emitted.
-	ScriptDir string
-
 	// ConfigMaps provides ConfigMap data to resolve configMapKeyRef and configMap volume sources.
 	// Key: ConfigMap name.
 	ConfigMaps map[string]v1.ConfigMap

@@ -42,7 +42,6 @@ func runInProcess(vmName string, pod *k8sv1.Pod, opts Options) ([]UnitFile, erro
 	generated, err := podmanquadlet.Convert(&podmanPod, podmanquadlet.Options{
 		NamePrefix: vmName,
 		Network:    opts.Network,
-		ScriptDir:  opts.ScriptDir,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("convert: %w", err)

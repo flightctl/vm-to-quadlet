@@ -82,12 +82,6 @@ type Options struct {
 	// unrelated to the Podman container network mode — do not set this to "pasta".
 	Network string
 
-	// ScriptDir is the absolute host path where generated .sh init scripts will be
-	// installed alongside the Quadlet unit files (e.g. /etc/containers/systemd/myvm).
-	// It is used to construct the Volume= bind-mount path in init container units.
-	// When empty a placeholder is emitted and the user must set the correct path.
-	ScriptDir string
-
 	// PasstWorkarounds enables the passt.avx2 binary patch init container that
 	// prevents a passt crash with 2+ vCPU guests due to the mrg_rxbuf scattergather
 	// overflow bug (fixed upstream in passt 0^20260611.ga9c61ff / PR #18235).
