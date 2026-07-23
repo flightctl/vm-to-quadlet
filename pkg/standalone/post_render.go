@@ -449,9 +449,9 @@ func detectGPUVendor(deviceName string) string {
 //
 //   - Registry source: on first boot, pulls the containerdisk image (added as
 //     an OCI image volume) and converts the embedded qcow2/img to a raw file on
-//     the PVC using qemu-img convert. Both docker:// and oci:// URL prefixes are
-//     stripped to obtain the plain image reference. Subsequent boots only handle
-//     size changes.
+//     the PVC using qemu-img convert (via a .partial temp file, renamed only on
+//     success). Both docker:// and oci:// URL prefixes are stripped to obtain
+//     the plain image reference. Subsequent boots only handle size changes.
 func injectDataVolumeInitContainers(pod *k8sv1.Pod, vmi *virtv1.VirtualMachineInstance, vm *virtv1.VirtualMachine, launcherImage string) {
 	type dvMeta struct {
 		sizeBytes   int64
@@ -514,9 +514,13 @@ func injectDataVolumeInitContainers(pod *k8sv1.Pod, vmi *virtv1.VirtualMachineIn
 				},
 			})
 
-			script := fmt.Sprintf(`DISK=%q
+			script := fmt.Sprintf(`set -eu
+DISK=%q
 SOURCE_MOUNT=%q
 SIZE=%d
+TMP="${DISK}.partial"
+rm -f "$TMP"
+trap 'rm -f "$TMP"' EXIT
 if [ ! -f "$DISK" ]; then
     SOURCE=$(find "$SOURCE_MOUNT" -maxdepth 2 \( -name "*.img" -o -name "*.qcow2" \) 2>/dev/null | head -1)
     if [ -z "$SOURCE" ]; then
@@ -524,11 +528,17 @@ if [ ! -f "$DISK" ]; then
         exit 1
     fi
     echo "Importing $SOURCE -> $DISK"
-    qemu-img convert -O raw "$SOURCE" "$DISK"
-    CURRENT=$(stat -c '%%s' "$DISK")
+    qemu-img convert -O raw "$SOURCE" "$TMP"
+    CURRENT=$(stat -c '%%s' "$TMP")
     if [ "$SIZE" -gt "$CURRENT" ]; then
-        qemu-img resize -f raw "$DISK" "$SIZE"
+        qemu-img resize -f raw "$TMP" "$SIZE"
+        CURRENT=$(stat -c '%%s' "$TMP")
     fi
+    if [ "$CURRENT" -lt "$SIZE" ]; then
+        echo "ERROR: imported disk smaller than requested ($CURRENT < $SIZE bytes)" >&2
+        exit 1
+    fi
+    mv -f "$TMP" "$DISK"
 else
     CURRENT=$(stat -c '%%s' "$DISK")
     if [ "$SIZE" -gt "$CURRENT" ]; then
@@ -553,10 +563,20 @@ fi`, diskPath, sourceMountPath, m.sizeBytes)
 				},
 			})
 		} else {
-			script := fmt.Sprintf(`DISK=%q
+			script := fmt.Sprintf(`set -eu
+DISK=%q
 SIZE=%d
+TMP="${DISK}.partial"
+rm -f "$TMP"
+trap 'rm -f "$TMP"' EXIT
 if [ ! -f "$DISK" ]; then
-    qemu-img create -f raw "$DISK" "$SIZE"
+    qemu-img create -f raw "$TMP" "$SIZE"
+    CURRENT=$(stat -c '%%s' "$TMP")
+    if [ "$CURRENT" -lt "$SIZE" ]; then
+        echo "ERROR: created disk smaller than requested ($CURRENT < $SIZE bytes)" >&2
+        exit 1
+    fi
+    mv -f "$TMP" "$DISK"
 else
     CURRENT=$(stat -c '%%s' "$DISK")
     if [ "$SIZE" -gt "$CURRENT" ]; then
