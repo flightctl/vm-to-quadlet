@@ -96,7 +96,7 @@ systemctl --user start virt-launcher-<vmname>-pod.service
 |------|---------|-------------|
 | `--vm-file` | stdin | Path to VirtualMachine YAML |
 | `--output-dir` | stdout | Directory to write Quadlet unit files |
-| `--launcher-image` | `quay.io/kubevirt/virt-launcher:v1.8.4` | virt-launcher image (see [passt version notes](docs/reference.md#appendix--virt-launcher-image-and-passt-version)) |
+| `--launcher-image` | `quay.io/kubevirt/virt-launcher:v1.9.0` | virt-launcher image (see [passt version notes](docs/reference.md#appendix--virt-launcher-image-and-passt-version)) |
 | `--podman-bin` | `podman` | Path to the podman binary |
 | `--vnc-proxy` | false | Inject a socat sidecar forwarding the VNC socket to `--vnc-port` |
 | `--vnc-port` | `5900` | TCP port for the VNC proxy |

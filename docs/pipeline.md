@@ -308,9 +308,10 @@ The compute container mounts `passt-bin` read-only at `/passt-bin/`.
 The init container runs as UID `0` (root) so it can write to the emptyDir
 volume before the qemu user takes over.
 
-The patch targets passt `0^20250512.g8ec1341` (shipped in
-`quay.io/kubevirt/virt-launcher:v1.8.4`). The bug causes a crash when the
-scattergather list overflows with 2+ vCPU guests.
+The patch targets passt `0^20250512.g8ec1341` (shipped in older images such as
+`quay.io/kubevirt/virt-launcher:v1.8.4`; the default `v1.9.0` already includes
+the fixed passt). The bug causes a crash when the scattergather list overflows
+with 2+ vCPU guests.
 
 ### Persistent state volumes
 

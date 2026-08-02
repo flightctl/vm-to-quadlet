@@ -75,7 +75,7 @@ or /etc/containers/systemd/ (system units) alongside the generated <vmname>-comp
 	}
 
 	rootCmd.Flags().StringVar(&vmFile, "vm-file", "", "Path to VirtualMachine YAML file (reads stdin if omitted)")
-	rootCmd.Flags().StringVar(&launcherImage, "launcher-image", "quay.io/kubevirt/virt-launcher:v1.8.4",
+	rootCmd.Flags().StringVar(&launcherImage, "launcher-image", "quay.io/kubevirt/virt-launcher:v1.9.0",
 		"virt-launcher image reference")
 	rootCmd.Flags().StringVar(&outputDir, "output-dir", "",
 		"Directory to write Quadlet unit files into (prints to stdout when omitted)")

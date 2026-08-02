@@ -251,8 +251,10 @@ These workarounds are not needed with `passt >= 0^20260611.ga9c61ff`
 
 ## Appendix — virt-launcher image and passt version
 
-The default virt-launcher image (`quay.io/kubevirt/virt-launcher:v1.8.4`) ships
-`passt 0^20250512.g8ec1341-2.el9`, which has two known issues in standalone mode:
+The default virt-launcher image (`quay.io/kubevirt/virt-launcher:v1.9.0`) ships
+`passt >= 0^20260611.ga9c61ff` (KubeVirt PR
+[#18235](https://github.com/kubevirt/kubevirt/pull/18235)), which fixes two
+issues that affect older images (e.g. `v1.8.4`) in standalone mode:
 
 1. **`mrg_rxbuf` crash** — with 2+ vCPUs, Windows' virtio-net driver posts many
    small RX buffers that exceed passt's `max_num_sg` limit, causing an assertion
@@ -261,21 +263,15 @@ The default virt-launcher image (`quay.io/kubevirt/virt-launcher:v1.8.4`) ships
 2. **UDP CPU spike** — passt consumes ~96% CPU and logs
    `"Invalid endpoint on UDP recvfrom()"` ([bug #185](https://bugs.passt.top/show_bug.cgi?id=185)).
 
-Both are fixed in `passt >= 0^20260611.ga9c61ff` (KubeVirt PR
-[#18235](https://github.com/kubevirt/kubevirt/pull/18235)).
-
-**Options:**
+When using an older virt-launcher image that still ships
+`passt 0^20250512.g8ec1341`:
 
 - Use `--passt-workarounds` to apply runtime XML patches that mitigate both
   issues without changing the image (see the passt workaround hook section above).
-- Use `--launcher-image` to supply a custom `virt-launcher` image that already
-  includes the fixed passt version, for example one built with:
+- Or rebuild the image with the fixed passt, for example:
 
   ```bash
   curl -Lo /tmp/passt.rpm 'http://mirror.stream.centos.org/9-stream/AppStream/x86_64/os/Packages/passt-0%5E20260611.ga9c61ff-1.el9.x86_64.rpm'
   printf 'FROM quay.io/kubevirt/virt-launcher:v1.8.4\nUSER root\nCOPY passt.rpm /tmp/\nRUN rpm -Uvh --nodeps /tmp/passt.rpm && rm /tmp/passt.rpm\n' > /tmp/Containerfile
   podman build -t <your-registry>/virt-launcher:v1.8.4-passt-fixed -f /tmp/Containerfile /tmp
   ```
-
-  Once KubeVirt cuts a release that includes PR #18235, `--launcher-image` can
-  point to that official image instead.
