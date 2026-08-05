@@ -267,6 +267,7 @@ func validateForStandalone(vm *virtv1.VirtualMachine) error {
 	}
 
 	errors = append(errors, validateDiskVolumeReferences(spec)...)
+	errors = append(errors, validateResourceQuantities(spec)...)
 
 	for _, w := range warnings {
 		fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
@@ -305,6 +306,31 @@ func validateDiskVolumeReferences(spec virtv1.VirtualMachineInstanceSpec) []stri
 				"disk %q does not match any volume in spec.template.spec.volumes; available volumes: %v",
 				disk.Name, volumeNames))
 		}
+	}
+	return errs
+}
+
+// validateResourceQuantities checks that CPU and memory requests/limits are
+// strictly positive. Unlike domain.cpu.cores (a uint32 struct field where a
+// user-supplied 0 is indistinguishable from the field being omitted, since
+// both unmarshal to the same Go zero value), these are resource.Quantity
+// values: an absent key is a nil map entry, so a "0" or negative quantity
+// found here can only come from an explicit value in the YAML.
+func validateResourceQuantities(spec virtv1.VirtualMachineInstanceSpec) []string {
+	var errs []string
+	errs = append(errs, nonPositiveResourceErrors("spec.domain.resources.requests", spec.Domain.Resources.Requests)...)
+	errs = append(errs, nonPositiveResourceErrors("spec.domain.resources.limits", spec.Domain.Resources.Limits)...)
+	return errs
+}
+
+func nonPositiveResourceErrors(path string, list k8sv1.ResourceList) []string {
+	var errs []string
+	for _, name := range []k8sv1.ResourceName{k8sv1.ResourceCPU, k8sv1.ResourceMemory} {
+		qty, ok := list[name]
+		if !ok || qty.Sign() > 0 {
+			continue
+		}
+		errs = append(errs, fmt.Sprintf("%s.%s must be a positive quantity, got %q", path, name, qty.String()))
 	}
 	return errs
 }
