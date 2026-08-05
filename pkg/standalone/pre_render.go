@@ -3,6 +3,7 @@ package standalone
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	k8sv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -265,6 +266,8 @@ func validateForStandalone(vm *virtv1.VirtualMachine) error {
 		}
 	}
 
+	errors = append(errors, validateDiskVolumeReferences(spec)...)
+
 	for _, w := range warnings {
 		fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
 	}
@@ -278,4 +281,30 @@ func validateForStandalone(vm *virtv1.VirtualMachine) error {
 		msg += fmt.Sprintf("  - %s\n", e)
 	}
 	return fmt.Errorf("%s", msg)
+}
+
+// validateDiskVolumeReferences checks that every disk in spec.Domain.Devices.Disks
+// references a volume defined in spec.Volumes. A real Kubernetes cluster rejects
+// this mismatch via the VirtualMachineInstance validating admission webhook;
+// standalone mode has no Kubernetes API to run that webhook, so we replicate the
+// check here. Without it, a typo'd disk name is silently accepted and only
+// manifests later as virt-launcher crash-looping at runtime.
+func validateDiskVolumeReferences(spec virtv1.VirtualMachineInstanceSpec) []string {
+	knownVolumes := make(map[string]bool, len(spec.Volumes))
+	volumeNames := make([]string, 0, len(spec.Volumes))
+	for _, vol := range spec.Volumes {
+		knownVolumes[vol.Name] = true
+		volumeNames = append(volumeNames, vol.Name)
+	}
+	sort.Strings(volumeNames)
+
+	var errs []string
+	for _, disk := range spec.Domain.Devices.Disks {
+		if !knownVolumes[disk.Name] {
+			errs = append(errs, fmt.Sprintf(
+				"disk %q does not match any volume in spec.template.spec.volumes; available volumes: %v",
+				disk.Name, volumeNames))
+		}
+	}
+	return errs
 }
