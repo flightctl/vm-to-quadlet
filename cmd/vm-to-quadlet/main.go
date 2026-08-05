@@ -2,13 +2,17 @@ package main
 
 import (
 	"archive/tar"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	virtv1 "kubevirt.io/api/core/v1"
 
@@ -48,7 +52,9 @@ stdout separated by "### <filename>" header lines.
 
 The generated files should be placed in ~/.config/containers/systemd/ (user units)
 or /etc/containers/systemd/ (system units) alongside the generated <vmname>-compute.env file.`,
-		Args: cobra.MaximumNArgs(1),
+		Args:          cobra.MaximumNArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
 				vmFile = args[0]
@@ -68,7 +74,6 @@ or /etc/containers/systemd/ (system units) alongside the generated <vmname>-comp
 				SerialImage:      serialImage,
 				PasstWorkarounds: passtWorkarounds,
 			}
-
 
 			return run(vmFile, opts, convOpts, outputDir)
 		},
@@ -174,9 +179,55 @@ func readVM(vmFile string) (*virtv1.VirtualMachine, error) {
 
 	vm := &virtv1.VirtualMachine{}
 	if err := yaml.Unmarshal(data, vm); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal VM: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal VM: %v%s", err, unmarshalErrorHint(err))
 	}
 	return vm, nil
+}
+
+// unmarshalErrorHint returns a short, actionable hint appended to a VM
+// unmarshal error, or "" if err doesn't match a known cause. It checks each
+// candidate cause via errors.Is/errors.As against the concrete error types
+// k8s.io/apimachinery and encoding/json actually return, rather than matching
+// substrings of err.Error() -- the sentinel/typed checks below survive being
+// wrapped (with %w) by sigs.k8s.io/yaml's unmarshal chain, so they keep
+// working even if the wrapping error text changes upstream.
+func unmarshalErrorHint(err error) string {
+	if hint := quantityErrorHint(err); hint != "" {
+		return hint
+	}
+	return uint32OverflowHint(err)
+}
+
+// quantityErrorHint returns a hint for unmarshal errors caused by a malformed
+// resource.Quantity value (e.g. a memory/CPU/storage value with an invalid
+// unit suffix). resource.Quantity's UnmarshalJSON returns one of these
+// sentinels directly, so errors.Is finds them however deep the error is
+// wrapped. The JSON decoder does not preserve a field path for errors
+// returned by a custom UnmarshalJSON, so the hint cannot point at the exact
+// YAML field.
+func quantityErrorHint(err error) string {
+	switch {
+	case errors.Is(err, resource.ErrSuffix),
+		errors.Is(err, resource.ErrNumeric),
+		errors.Is(err, resource.ErrFormatWrong):
+		return ". Hint: check memory/CPU/storage values for a valid unit suffix " +
+			"(e.g. domain.memory.guest, domain.resources.requests/limits) — valid examples: 512Mi, 2Gi, 1000m"
+	default:
+		return ""
+	}
+}
+
+// uint32OverflowHint returns a hint for unmarshal errors caused by a negative
+// number assigned to a uint32 field (e.g. domain.cpu.cores/sockets/threads,
+// which must be a whole number >= 0 and can't represent -1). encoding/json
+// reports this as a *json.UnmarshalTypeError, which -- unlike the Quantity
+// case above -- does carry the exact field path, so the hint can name it.
+func uint32OverflowHint(err error) string {
+	var typeErr *json.UnmarshalTypeError
+	if !errors.As(err, &typeErr) || typeErr.Type.Kind() != reflect.Uint32 {
+		return ""
+	}
+	return fmt.Sprintf(". Hint: %s must be a whole number of 0 or more", typeErr.Field)
 }
 
 // writeFiles writes each UnitFile to outputDir, or streams them as a TAR
