@@ -48,7 +48,9 @@ stdout separated by "### <filename>" header lines.
 
 The generated files should be placed in ~/.config/containers/systemd/ (user units)
 or /etc/containers/systemd/ (system units) alongside the generated <vmname>-compute.env file.`,
-		Args: cobra.MaximumNArgs(1),
+		Args:          cobra.MaximumNArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
 				vmFile = args[0]
@@ -174,9 +176,33 @@ func readVM(vmFile string) (*virtv1.VirtualMachine, error) {
 
 	vm := &virtv1.VirtualMachine{}
 	if err := yaml.Unmarshal(data, vm); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal VM: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal VM: %v%s", err, quantityErrorHint(err))
 	}
 	return vm, nil
+}
+
+// quantityParseSubstrings are the k8s.io/apimachinery resource.Quantity sentinel
+// error messages (ErrSuffix, ErrNumeric, ErrFormatWrong) that surface when a
+// memory/CPU/storage value has an invalid unit suffix or format.
+var quantityParseSubstrings = []string{
+	"quantity's suffix",
+	"numeric part of quantity",
+	"quantities must match the regular expression",
+}
+
+// quantityErrorHint returns a short, actionable hint for unmarshal errors caused
+// by a malformed resource.Quantity value, or "" if err doesn't match. The JSON
+// decoder does not preserve a field path for custom UnmarshalJSON errors, so the
+// hint cannot point at the exact YAML field.
+func quantityErrorHint(err error) string {
+	msg := err.Error()
+	for _, s := range quantityParseSubstrings {
+		if strings.Contains(msg, s) {
+			return ". Hint: check memory/CPU/storage values for a valid unit suffix " +
+				"(e.g. domain.memory.guest, domain.resources.requests/limits) — valid examples: 512Mi, 2Gi, 1000m"
+		}
+	}
+	return ""
 }
 
 // writeFiles writes each UnitFile to outputDir, or streams them as a TAR
