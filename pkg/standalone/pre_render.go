@@ -221,6 +221,9 @@ func forcePasstBinding(spec *virtv1.VirtualMachineInstanceSpec) {
 // validateForStandalone checks the VM spec for features that cannot work in
 // standalone mode. Hard errors are returned; soft warnings are printed to stderr.
 func validateForStandalone(vm *virtv1.VirtualMachine) error {
+	if vm.Spec.Template == nil {
+		return fmt.Errorf("spec.template is required")
+	}
 	spec := vm.Spec.Template.Spec
 
 	var errors []string
