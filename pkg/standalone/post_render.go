@@ -46,7 +46,7 @@ func AdaptForStandalone(pod *k8sv1.Pod, prepared *PreparedVM, opts Options) (*k8
 
 	injectVirtHandlerDirInit(pod, opts.LauncherImage)
 
-	if opts.PasstWorkarounds {
+	if opts.PasstWorkarounds || opts.PasstDebug {
 		injectPasstBinaryPatcher(pod, opts)
 	}
 
@@ -716,45 +716,21 @@ func volumeKey(volumeName string) string {
 	return volumeName
 }
 
-// injectPasstBinaryPatcher adds an init container that patches the passt.avx2
-// binary for the mrg_rxbuf crash (passt versions predating PR #18235), and
-// mounts the result into the compute container via a shared emptyDir volume.
+// injectPasstBinaryPatcher adds an init container that writes a thin `passt`
+// wrapper (and optionally a patched passt.avx2) into a shared emptyDir volume.
 //
-// The patched binary and a thin wrapper are written to an emptyDir volume named
-// "passt-bin" mounted at /passt-bin/ in both the init and compute containers.
-// Step 7 (ApplyPostConvertFixups) then prepends /passt-bin to PATH in the
-// compute container's environment so that libvirt's virFindFileInPath("passt")
-// picks up the wrapper before /usr/bin/passt.
+// The wrapper is written to an emptyDir volume named "passt-bin" mounted at
+// /passt-bin/ in both the init and compute containers. Step 7
+// (ApplyPostConvertFixups) then prepends /passt-bin to PATH in the compute
+// container so that libvirt's virFindFileInPath("passt") picks up the wrapper
+// before /usr/bin/passt.
 //
-// The wrapper calls /passt-bin/passt.avx2.patched (absolute path within the
-// shared volume), avoiding any dependency on the host output directory.
+// PasstWorkarounds: copy+patch passt.avx2 for the mrg_rxbuf crash (passt
+// versions predating PR #18235). The wrapper execs the patched binary.
+// PasstDebug: wrapper adds --debug --log-file /tmp/passt.log. Debug-only
+// (workarounds false) execs the image's /usr/bin/passt; no binary patch.
 func injectPasstBinaryPatcher(pod *k8sv1.Pod, opts Options) {
-	// Pure-sh binary patch using dd + od — no Python or perl required.
-	// The virt-launcher image contains dd, od, cp, and printf but not python3.
-	//
-	// Offset 0x2815d (decimal 164189): start of a jae rel32 instruction that
-	// branches to the abort path when the passt scattergather list overflows.
-	// We overwrite the 4-byte operand at 0x2815f (164191) with 0x58000000
-	// (little-endian 88) to redirect the jump to 0x281bb (the truncation epilogue).
-	// This is specific to passt 0^20250512.g8ec1341. If the binary doesn't match
-	// we copy it unpatched so the wrapper still works (no crash for 1-vCPU guests).
-	script := "set -e\n" +
-		"SRC=/usr/bin/passt.avx2\n" +
-		"OUT=/passt-bin/passt.avx2.patched\n" +
-		"cp \"$SRC\" \"$OUT\"\n" +
-		"chmod +x \"$OUT\"\n" +
-		// Read 6 bytes at 0x2815d and compare against the known jae opcode.
-		"EXPECTED=0f83d2000000\n" +
-		"ACTUAL=$(dd if=\"$SRC\" bs=1 skip=164189 count=6 2>/dev/null | od -A n -t x1 | tr -d ' \\n')\n" +
-		"if [ \"$ACTUAL\" = \"$EXPECTED\" ]; then\n" +
-		// Write the patched 4-byte operand at 0x2815f.
-		"    printf '\\x58\\x00\\x00\\x00' | dd of=\"$OUT\" bs=1 seek=164191 conv=notrunc 2>/dev/null\n" +
-		"    echo 'Patched passt.avx2 OK'\n" +
-		"else\n" +
-		"    echo \"Warning: passt.avx2 version not recognized (got $ACTUAL); using unpatched binary\" >&2\n" +
-		"fi\n" +
-		"printf '#!/bin/sh\\nexec /passt-bin/passt.avx2.patched \"$@\"\\n' > /passt-bin/passt\n" +
-		"chmod +x /passt-bin/passt\n"
+	script := passtWrapperScript(opts)
 
 	const passtBinVol = "passt-bin"
 	rootUID := int64(0)
@@ -785,6 +761,47 @@ func injectPasstBinaryPatcher(pod *k8sv1.Pod, opts Options) {
 		})
 		break
 	}
+}
+
+// passtWrapperScript is the init-container shell that populates /passt-bin.
+func passtWrapperScript(opts Options) string {
+	extraArgs := ""
+	if opts.PasstDebug {
+		extraArgs = " --debug --log-file /tmp/passt.log"
+	}
+
+	if !opts.PasstWorkarounds {
+		return "set -e\n" +
+			"printf '#!/bin/sh\\nexec /usr/bin/passt" + extraArgs + " \"$@\"\\n' > /passt-bin/passt\n" +
+			"chmod +x /passt-bin/passt\n"
+	}
+
+	// Pure-sh binary patch using dd + od — no Python or perl required.
+	// The virt-launcher image contains dd, od, cp, and printf but not python3.
+	//
+	// Offset 0x2815d (decimal 164189): start of a jae rel32 instruction that
+	// branches to the abort path when the passt scattergather list overflows.
+	// We overwrite the 4-byte operand at 0x2815f (164191) with 0x58000000
+	// (little-endian 88) to redirect the jump to 0x281bb (the truncation epilogue).
+	// This is specific to passt 0^20250512.g8ec1341. If the binary doesn't match
+	// we copy it unpatched so the wrapper still works (no crash for 1-vCPU guests).
+	return "set -e\n" +
+		"SRC=/usr/bin/passt.avx2\n" +
+		"OUT=/passt-bin/passt.avx2.patched\n" +
+		"cp \"$SRC\" \"$OUT\"\n" +
+		"chmod +x \"$OUT\"\n" +
+		// Read 6 bytes at 0x2815d and compare against the known jae opcode.
+		"EXPECTED=0f83d2000000\n" +
+		"ACTUAL=$(dd if=\"$SRC\" bs=1 skip=164189 count=6 2>/dev/null | od -A n -t x1 | tr -d ' \\n')\n" +
+		"if [ \"$ACTUAL\" = \"$EXPECTED\" ]; then\n" +
+		// Write the patched 4-byte operand at 0x2815f.
+		"    printf '\\x58\\x00\\x00\\x00' | dd of=\"$OUT\" bs=1 seek=164191 conv=notrunc 2>/dev/null\n" +
+		"    echo 'Patched passt.avx2 OK'\n" +
+		"else\n" +
+		"    echo \"Warning: passt.avx2 version not recognized (got $ACTUAL); using unpatched binary\" >&2\n" +
+		"fi\n" +
+		"printf '#!/bin/sh\\nexec /passt-bin/passt.avx2.patched" + extraArgs + " \"$@\"\\n' > /passt-bin/passt\n" +
+		"chmod +x /passt-bin/passt\n"
 }
 
 func cleanupForStandalone(pod *k8sv1.Pod, vmi *virtv1.VirtualMachineInstance) {
