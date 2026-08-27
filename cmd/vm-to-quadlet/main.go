@@ -33,6 +33,7 @@ func main() {
 		serialImage      string
 		outputDir        string
 		passtWorkarounds bool
+		passtDebug       bool
 		network          string
 	)
 
@@ -73,6 +74,7 @@ or /etc/containers/systemd/ (system units) alongside the generated <vmname>-comp
 				SerialPort:       consolePort,
 				SerialImage:      serialImage,
 				PasstWorkarounds: passtWorkarounds,
+				PasstDebug:       passtDebug,
 			}
 
 			return run(vmFile, opts, convOpts, outputDir)
@@ -98,6 +100,8 @@ or /etc/containers/systemd/ (system units) alongside the generated <vmname>-comp
 		"Container image for the serial console socat proxy sidecar")
 	rootCmd.Flags().BoolVar(&passtWorkarounds, "passt-workarounds", false,
 		"Patch the passt.avx2 binary at pod startup to fix the mrg_rxbuf crash with 2+ vCPU guests (needed for virt-launcher images predating passt 0^20260611.ga9c61ff)")
+	rootCmd.Flags().BoolVar(&passtDebug, "passt-debug", false,
+		"Start passt with --debug --log-file /tmp/passt.log via a PATH wrapper (does not patch the binary; works with --passt-workarounds=false)")
 	rootCmd.Flags().StringVar(&network, "network", "",
 		"Quadlet Network= value for the VM pod (e.g. \"shared.network\" or \"host\"); omit to generate a dedicated per-VM .network unit for full isolation")
 

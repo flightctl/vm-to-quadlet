@@ -26,6 +26,11 @@ type Options struct {
 	// and the libvirt hook injection (step 7) for known passt bugs in older
 	// virt-launcher images (pre-0^20260611.ga9c61ff / pre-PR #18235).
 	PasstWorkarounds bool
+
+	// PasstDebug writes a PATH wrapper that starts passt with --debug
+	// --log-file /tmp/passt.log. Independent of PasstWorkarounds: it does not
+	// patch the binary. Combine both flags to debug a patched passt.
+	PasstDebug bool
 }
 
 // PreparedVM is the output of PrepareForRendering (step 3).

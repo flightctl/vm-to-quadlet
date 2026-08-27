@@ -10,11 +10,12 @@ import (
 // ApplyPostConvertFixups is step 7: post-quadlet fixups applied directly to the
 // generated INI text. Currently handles:
 //   - PublishPort injection into the pod unit when a VNC or serial proxy is enabled.
-//   - Passt binary patch: PATH override for the compute container when --passt-workarounds.
+//   - Passt wrapper PATH override for the compute container when
+//     --passt-workarounds or --passt-debug is set.
 func ApplyPostConvertFixups(files []quadlet.UnitFile, vmName string, standaloneOpts Options, convOpts quadlet.Options) ([]quadlet.UnitFile, error) {
 	files = injectPodPublishPorts(files, vmName, standaloneOpts)
 
-	if convOpts.PasstWorkarounds {
+	if convOpts.PasstWorkarounds || standaloneOpts.PasstDebug {
 		files = injectPasstBinaryPath(files, vmName)
 	}
 
