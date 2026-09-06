@@ -84,13 +84,18 @@ func TestConvert_AlwaysEmitsPodUnit(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "myapp", name)
 
-	// ExitPolicy=continue must be set so the infra container (pause) outlives
-	// individual workload containers — including init containers that complete
-	// before main containers start. Without this, Podman's default "stop" policy
-	// tears down the infra on the first container exit, killing the pod.
-	ep, ok := pu.Unit.Lookup(quadlet.PodGroup, quadlet.KeyExitPolicy)
-	assert.True(t, ok, "ExitPolicy must be set on pod unit")
-	assert.Equal(t, "continue", ep)
+	// The infra container must use --exit-policy continue so it outlives
+	// individual workload containers — including init containers that
+	// complete before main containers start. Without this, Podman's default
+	// "stop" policy tears down the infra on the first container exit.
+	//
+	// ExitPolicy= in the [Pod] group is only supported from Podman 5.7.0.
+	// We use PodmanArgs=--exit-policy instead for compatibility with older
+	// Podman versions (e.g. RHEL 9.7 ships 5.6.0). (EDM-5571)
+	assert.False(t, pu.Unit.HasKey(quadlet.PodGroup, quadlet.KeyExitPolicy),
+		"ExitPolicy= must not appear in [Pod]; use PodmanArgs=--exit-policy instead")
+	args := pu.Unit.LookupAll(quadlet.PodGroup, quadlet.KeyPodmanArgs)
+	assert.Contains(t, args, "--exit-policy continue")
 
 	// Pod unit is WantedBy default.target
 	wb := pu.Unit.LookupAll(quadlet.InstallGroup, "WantedBy")
@@ -258,9 +263,14 @@ func TestConvert_TerminationGracePeriod_OnPodUnit(t *testing.T) {
 
 	pu := podUnit(files)
 	require.NotNil(t, pu)
-	val, ok := pu.Unit.Lookup(quadlet.PodGroup, quadlet.KeyStopTimeout)
-	assert.True(t, ok)
-	assert.Equal(t, "30", val)
+
+	// StopTimeout= in the [Pod] group is only supported from Podman 5.7.0.
+	// We use PodmanArgs=--stop-timeout instead for compatibility with older
+	// Podman versions (e.g. RHEL 9.7 ships 5.6.0). (EDM-5571)
+	assert.False(t, pu.Unit.HasKey(quadlet.PodGroup, quadlet.KeyStopTimeout),
+		"StopTimeout= must not appear in [Pod]; use PodmanArgs=--stop-timeout instead")
+	args := pu.Unit.LookupAll(quadlet.PodGroup, quadlet.KeyPodmanArgs)
+	assert.Contains(t, args, "--stop-timeout 30")
 
 	// Must NOT be on the container unit
 	cu := containerUnit(files, "p", "app")
