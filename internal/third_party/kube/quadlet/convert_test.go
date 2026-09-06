@@ -258,9 +258,14 @@ func TestConvert_TerminationGracePeriod_OnPodUnit(t *testing.T) {
 
 	pu := podUnit(files)
 	require.NotNil(t, pu)
-	val, ok := pu.Unit.Lookup(quadlet.PodGroup, quadlet.KeyStopTimeout)
-	assert.True(t, ok)
-	assert.Equal(t, "30", val)
+
+	// StopTimeout= in the [Pod] group is only supported from Podman 5.7.0.
+	// We use PodmanArgs=--stop-timeout instead for compatibility with older
+	// Podman versions (e.g. RHEL 9.7 ships 5.6.0). (EDM-5571)
+	assert.False(t, pu.Unit.HasKey(quadlet.PodGroup, quadlet.KeyStopTimeout),
+		"StopTimeout= must not appear in [Pod]; use PodmanArgs=--stop-timeout instead")
+	args := pu.Unit.LookupAll(quadlet.PodGroup, quadlet.KeyPodmanArgs)
+	assert.Contains(t, args, "--stop-timeout 30")
 
 	// Must NOT be on the container unit
 	cu := containerUnit(files, "p", "app")
