@@ -175,7 +175,15 @@ func buildPodUnit(pod *v1.Pod, opts Options, emptyDirVolNames []string) *parser.
 	// Without this, Podman's default "stop" exit policy tears down the infra
 	// when the last non-infra container exits — creating a race where init
 	// containers complete before main containers start, leaving the pod empty.
-	u.Set(quadlet.PodGroup, quadlet.KeyExitPolicy, "continue")
+	//
+	// LOCAL DIVERGENCE: use PodmanArgs=--exit-policy instead of the native
+	// ExitPolicy= key.  ExitPolicy= in the [Pod] group is only supported
+	// from Podman 5.7.0 (Nov 2025).  RHEL 9.7 ships Podman 5.6.0, where
+	// the Quadlet generator rejects the key with "unsupported key
+	// 'ExitPolicy' in group 'Pod'", blocking VM deployment.
+	// PodmanArgs=--exit-policy is supported on all Podman versions that
+	// support .pod Quadlet files.  (EDM-5571)
+	u.Add(quadlet.PodGroup, quadlet.KeyPodmanArgs, "--exit-policy continue")
 
 	// Network.
 	if pod.Spec.HostNetwork {
