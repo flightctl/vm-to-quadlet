@@ -265,12 +265,20 @@ func TestConvert_TerminationGracePeriod_OnPodUnit(t *testing.T) {
 	require.NotNil(t, pu)
 
 	// StopTimeout= in the [Pod] group is only supported from Podman 5.7.0.
-	// We use PodmanArgs=--stop-timeout instead for compatibility with older
-	// Podman versions (e.g. RHEL 9.7 ships 5.6.0). (EDM-5571)
+	// We use [Service] TimeoutStopSec= instead — a standard systemd directive
+	// that works on all Podman/systemd versions.  (EDM-5571)
+	//
+	// Note: PodmanArgs=--stop-timeout is NOT valid for `podman pod create`.
 	assert.False(t, pu.Unit.HasKey(quadlet.PodGroup, quadlet.KeyStopTimeout),
-		"StopTimeout= must not appear in [Pod]; use PodmanArgs=--stop-timeout instead")
-	args := pu.Unit.LookupAll(quadlet.PodGroup, quadlet.KeyPodmanArgs)
-	assert.Contains(t, args, "--stop-timeout 30")
+		"StopTimeout= must not appear in [Pod]")
+	podArgs := pu.Unit.LookupAll(quadlet.PodGroup, quadlet.KeyPodmanArgs)
+	for _, a := range podArgs {
+		assert.NotContains(t, a, "--stop-timeout",
+			"--stop-timeout is not a valid flag for podman pod create; use [Service] TimeoutStopSec=")
+	}
+	tss, ok := pu.Unit.Lookup(quadlet.ServiceGroup, "TimeoutStopSec")
+	assert.True(t, ok, "TimeoutStopSec= must be set in [Service] section of pod unit")
+	assert.Equal(t, "30", tss)
 
 	// Must NOT be on the container unit
 	cu := containerUnit(files, "p", "app")
