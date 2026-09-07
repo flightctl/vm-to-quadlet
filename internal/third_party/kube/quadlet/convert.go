@@ -193,8 +193,16 @@ func buildPodUnit(pod *v1.Pod, opts Options, emptyDirVolNames []string) *parser.
 	}
 
 	// Hostname.
+	// LOCAL DIVERGENCE: use PodmanArgs=--hostname instead of the native
+	// HostName= key.  HostName= in the [Pod] group is only supported
+	// from Podman 5.7.0 (Nov 2025).  RHEL 9.7 ships Podman 5.6.0, where
+	// the Quadlet generator rejects the key with "unsupported key
+	// 'HostName' in group 'Pod'", blocking VM deployment.
+	// PodmanArgs=--hostname is supported on all Podman versions that
+	// support .pod Quadlet files.  (EDM-5571)
 	if pod.Spec.Hostname != "" {
-		u.Set(quadlet.PodGroup, quadlet.KeyHostName, pod.Spec.Hostname)
+		u.Add(quadlet.PodGroup, quadlet.KeyPodmanArgs,
+			fmt.Sprintf("--hostname %s", pod.Spec.Hostname))
 	}
 
 	// Host aliases.

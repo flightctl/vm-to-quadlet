@@ -715,9 +715,12 @@ func TestConvert_MemoryLimit(t *testing.T) {
 	files, err := Convert(pod, opts()); require.NoError(t, err)
 	f := requireFile(t, files, "myvm-compute.container")
 
-	t.Run("memory limit maps to Memory= in bytes (not MemoryLimit=)", func(t *testing.T) {
-		require.Contains(t, f.Content, "Memory=2147483648")
+	t.Run("memory limit maps to PodmanArgs=--memory in bytes (not Memory= or MemoryLimit=)", func(t *testing.T) {
+		// Memory= in [Container] is only supported from Podman 5.7.0.
+		// We use PodmanArgs=--memory instead. (EDM-5571)
+		require.NotContains(t, f.Content, "Memory=", "Memory= key must not be used")
 		require.NotContains(t, f.Content, "MemoryLimit=")
+		require.Contains(t, f.Content, "PodmanArgs=--memory=2147483648")
 	})
 }
 

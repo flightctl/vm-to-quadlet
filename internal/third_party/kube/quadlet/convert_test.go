@@ -367,8 +367,13 @@ func TestConvert_Hostname_HostAliases_DNS_OnPodUnit(t *testing.T) {
 	pu := podUnit(files)
 	require.NotNil(t, pu)
 
-	hn, _ := pu.Unit.Lookup(quadlet.PodGroup, quadlet.KeyHostName)
-	assert.Equal(t, "myhost", hn)
+	// HostName= in the [Pod] group is only supported from Podman 5.7.0.
+	// We use PodmanArgs=--hostname instead for compatibility with older
+	// Podman versions (e.g. RHEL 9.7 ships 5.6.0). (EDM-5571)
+	assert.False(t, pu.Unit.HasKey(quadlet.PodGroup, quadlet.KeyHostName),
+		"HostName= must not appear in [Pod]; use PodmanArgs=--hostname instead")
+	hnArgs := pu.Unit.LookupAll(quadlet.PodGroup, quadlet.KeyPodmanArgs)
+	assert.Contains(t, hnArgs, "--hostname myhost")
 
 	hosts := pu.Unit.LookupAll(quadlet.PodGroup, quadlet.KeyAddHost)
 	assert.Contains(t, hosts, "foo.local:1.2.3.4")
@@ -563,13 +568,16 @@ func TestConvert_ResourceLimits(t *testing.T) {
 	cu := containerUnit(files, "p", "app")
 	require.NotNil(t, cu)
 
-	mem, ok := cu.Unit.Lookup(quadlet.ContainerGroup, quadlet.KeyMemory)
-	assert.True(t, ok)
-	assert.Equal(t, fmt.Sprintf("%d", int64(512*1024*1024)), mem, "memory must be raw bytes")
+	// Memory= in the [Container] group is only supported from Podman 5.7.0.
+	// We use PodmanArgs=--memory instead for compatibility with older
+	// Podman versions (e.g. RHEL 9.7 ships 5.6.0). (EDM-5571)
+	assert.False(t, cu.Unit.HasKey(quadlet.ContainerGroup, quadlet.KeyMemory),
+		"Memory= must not appear in [Container]; use PodmanArgs=--memory instead")
 
 	args := cu.Unit.LookupAll(quadlet.ContainerGroup, quadlet.KeyPodmanArgs)
 	hasCPUQuota := false
 	hasMemReservation := false
+	hasMemoryLimit := false
 	for _, a := range args {
 		if strings.HasPrefix(a, "--cpu-quota=") {
 			hasCPUQuota = true
@@ -577,12 +585,18 @@ func TestConvert_ResourceLimits(t *testing.T) {
 		if strings.HasPrefix(a, "--memory-reservation=") {
 			hasMemReservation = true
 		}
+		if a == fmt.Sprintf("--memory=%d", int64(512*1024*1024)) {
+			hasMemoryLimit = true
+		}
 	}
 	assert.True(t, hasCPUQuota, "cpu-quota PodmanArgs expected")
 	assert.True(t, hasMemReservation, "memory-reservation PodmanArgs expected")
+	assert.True(t, hasMemoryLimit, "memory PodmanArgs expected")
 }
 
-func TestConvert_MemoryDirectiveIsMemory_NotMemoryLimit(t *testing.T) {
+func TestConvert_MemoryDirectiveIsPodmanArgs_NotMemoryKey(t *testing.T) {
+	// Memory= in [Container] is only supported from Podman 5.7.0.
+	// We use PodmanArgs=--memory instead. (EDM-5571)
 	pod := minimalPod("p", "nginx")
 	pod.Spec.Containers[0].Resources = v1.ResourceRequirements{
 		Limits: v1.ResourceList{v1.ResourceMemory: resource.MustParse("1Gi")},
@@ -592,8 +606,9 @@ func TestConvert_MemoryDirectiveIsMemory_NotMemoryLimit(t *testing.T) {
 	cu := containerUnit(files, "p", "app")
 	content, err := cu.Unit.ToString()
 	require.NoError(t, err)
-	assert.Contains(t, content, "Memory=")
+	assert.NotContains(t, content, "Memory=", "Memory= key must not be used; use PodmanArgs=--memory")
 	assert.NotContains(t, content, "MemoryLimit=")
+	assert.Contains(t, content, "--memory=")
 }
 
 func TestConvert_VolumeMount_PVC(t *testing.T) {
