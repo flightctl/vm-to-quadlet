@@ -255,20 +255,42 @@ var _ = Describe("Quadlet file validation across Podman versions", Ordered, func
 		Expect(quadletFiles).NotTo(BeEmpty(), "Convert() must produce at least one Quadlet file")
 
 		// Sanity checks: verify EDM-5571 fixes are all in place.
+		//
+		// NOTE ON INTEGRATION TEST LIMITATIONS: The `quadlet --dryrun`
+		// validation below only checks Quadlet file *syntax* (supported
+		// keys, section names, value formats).  It does NOT validate the
+		// *runtime* validity of PodmanArgs values — any string is accepted
+		// as a PodmanArgs value because Quadlet passes it verbatim to the
+		// podman CLI.  An invalid flag like --stop-timeout (which is not a
+		// `podman pod create` flag) would pass quadlet --dryrun but fail at
+		// runtime when systemd executes the generated unit.
+		//
+		// These sanity checks therefore validate the *content* of generated
+		// files directly, complementing the quadlet --dryrun syntax check.
 		for _, f := range quadletFiles {
 			if strings.HasSuffix(f.Name, ".pod") {
+				// Keys that are NOT supported in [Pod] until Podman 5.7.0.
 				Expect(f.Content).NotTo(ContainSubstring("StopTimeout="),
 					"EDM-5571: .pod file %q must not contain StopTimeout=", f.Name)
 				Expect(f.Content).NotTo(ContainSubstring("ExitPolicy="),
 					"EDM-5571: .pod file %q must not contain ExitPolicy=", f.Name)
 				Expect(f.Content).NotTo(ContainSubstring("HostName="),
 					"EDM-5571: .pod file %q must not contain HostName=", f.Name)
-				Expect(f.Content).To(ContainSubstring("--stop-timeout"),
-					"EDM-5571: .pod file %q must use PodmanArgs=--stop-timeout", f.Name)
+
+				// PodmanArgs must NOT contain flags invalid for `podman pod create`.
+				// --stop-timeout is a `podman stop` flag, not `podman pod create`.
+				Expect(f.Content).NotTo(ContainSubstring("--stop-timeout"),
+					"EDM-5571: .pod file %q must not use --stop-timeout (invalid for podman pod create); use [Service] TimeoutStopSec=", f.Name)
+
+				// Positive assertions for the PodmanArgs approach.
 				Expect(f.Content).To(ContainSubstring("--exit-policy"),
 					"EDM-5571: .pod file %q must use PodmanArgs=--exit-policy", f.Name)
 				Expect(f.Content).To(ContainSubstring("--hostname"),
 					"EDM-5571: .pod file %q must use PodmanArgs=--hostname", f.Name)
+
+				// TimeoutStopSec= in [Service] replaces the stop-timeout.
+				Expect(f.Content).To(ContainSubstring("TimeoutStopSec="),
+					"EDM-5571: .pod file %q must contain TimeoutStopSec= in [Service]", f.Name)
 			}
 			if strings.HasSuffix(f.Name, ".container") {
 				Expect(f.Content).NotTo(MatchRegexp(`(?m)^Memory=`),

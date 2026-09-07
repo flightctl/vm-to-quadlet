@@ -252,16 +252,24 @@ func buildPodUnit(pod *v1.Pod, opts Options, emptyDirVolNames []string) *parser.
 	}
 
 	// Termination grace period.
-	// LOCAL DIVERGENCE: use PodmanArgs=--stop-timeout instead of the native
-	// StopTimeout= key.  StopTimeout= in the [Pod] group is only supported
-	// from Podman 5.7.0 (Nov 2025).  RHEL 9.7 ships Podman 5.6.0, where
-	// the Quadlet generator rejects the key with "unsupported key
+	// LOCAL DIVERGENCE: use [Service] TimeoutStopSec= instead of the native
+	// [Pod] StopTimeout= key.  StopTimeout= in the [Pod] group is only
+	// supported from Podman 5.7.0 (Nov 2025).  RHEL 9.7 ships Podman 5.6.0,
+	// where the Quadlet generator rejects the key with "unsupported key
 	// 'StopTimeout' in group 'Pod'", blocking VM deployment entirely.
-	// PodmanArgs=--stop-timeout is supported on all Podman versions that
-	// support .pod Quadlet files.  (EDM-5571)
+	//
+	// TimeoutStopSec= is a standard systemd [Service] directive — it is
+	// passed through verbatim to the generated systemd unit and works on
+	// all Podman/systemd versions.  It controls how long systemd waits
+	// after sending SIGTERM before sending SIGKILL, which is the same
+	// semantics as the Kubernetes TerminationGracePeriodSeconds field.
+	//
+	// Note: PodmanArgs=--stop-timeout does NOT work because --stop-timeout
+	// is not a valid flag for `podman pod create` (only for `podman stop`).
+	// (EDM-5571)
 	if pod.Spec.TerminationGracePeriodSeconds != nil {
-		u.Add(quadlet.PodGroup, quadlet.KeyPodmanArgs,
-			fmt.Sprintf("--stop-timeout %d", *pod.Spec.TerminationGracePeriodSeconds))
+		u.Set(quadlet.ServiceGroup, "TimeoutStopSec",
+			fmt.Sprintf("%d", *pod.Spec.TerminationGracePeriodSeconds))
 	}
 
 	// Mount each emptyDir volume on the infra container.
