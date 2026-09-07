@@ -27,8 +27,16 @@ func applyMemoryLimit(unit *parser.UnitFile, resources v1.ResourceRequirements) 
 	if !ok || mem.IsZero() {
 		return
 	}
+	// LOCAL DIVERGENCE: use PodmanArgs=--memory instead of the native
+	// Memory= key.  Memory= in the [Container] group is only supported
+	// from Podman 5.7.0 (Nov 2025).  RHEL 9.7 ships Podman 5.6.0, where
+	// the Quadlet generator rejects the key with "unsupported key
+	// 'Memory' in group 'Container'", blocking VM deployment.
+	// PodmanArgs=--memory is supported on all Podman versions that
+	// support Quadlet .container files.  (EDM-5571)
 	// Emit raw bytes — unambiguous, no suffix needed.
-	unit.Set(quadlet.ContainerGroup, quadlet.KeyMemory, fmt.Sprintf("%d", mem.Value()))
+	unit.Add(quadlet.ContainerGroup, quadlet.KeyPodmanArgs,
+		fmt.Sprintf("--memory=%d", mem.Value()))
 }
 
 func applyMemoryRequest(unit *parser.UnitFile, resources v1.ResourceRequirements) {
