@@ -19,6 +19,7 @@ import (
 	"github.com/flightctl/vm-to-quadlet/pkg/kubevirt"
 	"github.com/flightctl/vm-to-quadlet/pkg/quadlet"
 	"github.com/flightctl/vm-to-quadlet/pkg/standalone"
+	"github.com/flightctl/vm-to-quadlet/pkg/version"
 )
 
 func main() {
@@ -78,6 +79,15 @@ or /etc/containers/systemd/ (system units) alongside the generated <vmname>-comp
 			return run(vmFile, opts, convOpts, outputDir)
 		},
 	}
+
+	versionCmd := &cobra.Command{
+		Use:   "version",
+		Short: "Print the version information",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Println(version.Get())
+		},
+	}
+	rootCmd.AddCommand(versionCmd)
 
 	rootCmd.Flags().StringVar(&vmFile, "vm-file", "", "Path to VirtualMachine YAML file (reads stdin if omitted)")
 	rootCmd.Flags().StringVar(&launcherImage, "launcher-image", "quay.io/kubevirt/virt-launcher:v1.9.0",
