@@ -505,6 +505,8 @@ func TestConvert_EmptyDirVolume(t *testing.T) {
 		// containers in the pod with consistent options.
 		vf := requireFile(t, files, "myvm-private-empty.volume")
 		require.Contains(t, vf.Content, "Type=tmpfs")
+		require.Contains(t, vf.Content, "User=107")
+		require.Contains(t, vf.Content, "Group=107")
 	})
 }
 

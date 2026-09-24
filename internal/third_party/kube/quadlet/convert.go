@@ -1,6 +1,7 @@
 // Vendored from github.com/containers/podman (fork at ~/dev/podman).
 // Import paths rewritten from go.podman.io/podman/v6 -> github.com/flightctl/vm-to-quadlet.
-// No other changes.
+// Local divergence: emptyDir tmpfs mounts are owned by qemu so rootless VMs
+// can write to them after the pod infra container mounts them first.
 package quadlet
 
 import (
@@ -70,6 +71,12 @@ func Convert(pod *v1.Pod, opts Options) ([]*GeneratedFile, error) {
 			volUnit.Set(quadlet.VolumeGroup, "Device", "tmpfs")
 			volUnit.Set(quadlet.VolumeGroup, "Type", "tmpfs")
 			volUnit.Set(quadlet.VolumeGroup, "Options", "nodev,mode=0777")
+			// The infra container mounts this volume before any VM container.
+			// Set the tmpfs mount owner at creation so its first mount is
+			// writable by qemu with Podman's default user namespace mapping.
+			// UID=/GID= affect the backing directory, not the tmpfs mount.
+			volUnit.Set(quadlet.VolumeGroup, "User", "107")
+			volUnit.Set(quadlet.VolumeGroup, "Group", "107")
 			output = append(output, &GeneratedFile{Name: volUnit.Filename, Unit: volUnit})
 			emptyDirVolNames = append(emptyDirVolNames, volName)
 		}
